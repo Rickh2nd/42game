@@ -1,0 +1,17 @@
+[
+  { "id": "default_lounge", "name": "Classic Domino Lounge", "preview": "/assets/environments/default_lounge/preview.svg" },
+  { "id": "witch_parlor", "name": "Witchy Parlor", "preview": "/assets/environments/witch_parlor/preview.svg" },
+  { "id": "zombie_graveyard", "name": "Graveyard Fog", "preview": "/assets/environments/zombie_graveyard/preview.svg" },
+  { "id": "pirate_cove", "name": "Pirate Cove", "preview": "/assets/environments/pirate_cove/preview.svg" },
+  { "id": "cowboy_saloon", "name": "Old West Saloon", "preview": "/assets/environments/cowboy_saloon/preview.svg" },
+  { "id": "ninja_dojo", "name": "Ninja Dojo", "preview": "/assets/environments/ninja_dojo/preview.svg" },
+  { "id": "knight_castle", "name": "Castle Hall", "preview": "/assets/environments/knight_castle/preview.svg" },
+  { "id": "goblin_cave", "name": "Goblin Cave", "preview": "/assets/environments/goblin_cave/preview.svg" },
+  { "id": "elf_forest", "name": "Enchanted Forest", "preview": "/assets/environments/elf_forest/preview.svg" },
+  { "id": "wizard_tower", "name": "Wizard Tower", "preview": "/assets/environments/wizard_tower/preview.svg" },
+  { "id": "hospital_clinic", "name": "Clinic", "preview": "/assets/environments/hospital_clinic/preview.svg" },
+  { "id": "battlefield", "name": "Battlefield Camp", "preview": "/assets/environments/battlefield/preview.svg" },
+  { "id": "kitchen", "name": "Chef's Kitchen", "preview": "/assets/environments/kitchen/preview.svg" },
+  { "id": "modern_office", "name": "Modern Office", "preview": "/assets/environments/modern_office/preview.svg" },
+  { "id": "viking_longhouse", "name": "Viking Longhouse", "preview": "/assets/environments/viking_longhouse/preview.svg" }
+]

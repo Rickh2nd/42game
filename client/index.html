@@ -47,6 +47,7 @@
           <div class="nameplate" id="nameplate-2" data-seat="2"></div>
           <div class="nameplate" id="nameplate-3" data-seat="3"></div>
         </div>
+        <div id="emojiOverlays"></div>
 
         <button id="panelToggle" title="Toggle menu">☰</button>
       </div>
@@ -84,6 +85,7 @@
           <div class="buttonRow">
             <button id="startGameBtn">Start Game</button>
             <button id="restartGameBtn">Restart Game</button>
+            <button id="resetViewBtn">Reset View</button>
           </div>
           <div class="controlRow">
             <label>
@@ -95,6 +97,12 @@
             <button id="timerPauseBtn">Pause Timer</button>
           </div>
           <div id="timerStateText" class="smallText">Timer Off</div>
+          <div class="controlRow">
+            <label for="environmentSelect">Background</label>
+            <select id="environmentSelect"></select>
+            <img id="environmentPreview" alt="Background preview" />
+            <div id="environmentStateText" class="smallText"></div>
+          </div>
         </section>
 
         <section id="section-bidding" class="panelSection">

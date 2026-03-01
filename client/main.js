@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
@@ -46,6 +48,11 @@ const turnTimerHud = document.getElementById('turnTimerHud');
 const timerEnabledToggle = document.getElementById('timerEnabledToggle');
 const timerPauseBtn = document.getElementById('timerPauseBtn');
 const timerStateText = document.getElementById('timerStateText');
+const resetViewBtn = document.getElementById('resetViewBtn');
+const environmentSelect = document.getElementById('environmentSelect');
+const environmentPreview = document.getElementById('environmentPreview');
+const environmentStateText = document.getElementById('environmentStateText');
+const emojiOverlays = document.getElementById('emojiOverlays');
 
 const sectionRoom = document.getElementById('section-room');
 const sectionPlayers = document.getElementById('section-players');
@@ -89,8 +96,20 @@ const scene = new THREE.Scene();
 scene.background = null;
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(0, 7.7, 6.95);
-camera.lookAt(0, 0.68, 0);
+camera.position.set(0.22, 1.24, 5.58);
+camera.lookAt(0, 0.78, 0);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.enablePan = false;
+controls.minDistance = 4.9;
+controls.maxDistance = 7.1;
+controls.minPolarAngle = 1.07;
+controls.maxPolarAngle = 1.5;
+controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
+controls.target.set(0, 0.78, 0);
 
 const visualsGroup = new THREE.Group();
 visualsGroup.name = 'visualsGroup';
@@ -99,6 +118,10 @@ scene.add(visualsGroup);
 const tableRoot = new THREE.Group();
 tableRoot.name = 'tableRoot';
 visualsGroup.add(tableRoot);
+
+const themeGroup = new THREE.Group();
+themeGroup.name = 'themeGroup';
+scene.add(themeGroup);
 
 const environmentGroup = new THREE.Group();
 environmentGroup.name = 'environmentGroup';
@@ -176,7 +199,7 @@ axesHelper.position.y = PLAY_PLANE_Y;
 axesHelper.visible = false;
 scene.add(axesHelper);
 
-const dominoGeometry = new THREE.BoxGeometry(1.16, DOMINO_THICKNESS, 0.58);
+const dominoGeometry = new RoundedBoxGeometry(1.24, DOMINO_THICKNESS, 0.62, 5, 0.052);
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const clock = new THREE.Clock();
@@ -188,6 +211,7 @@ const mtlLoader = new MTLLoader();
 const textureCache = new Map();
 const modelCache = new Map();
 const activeAvatarLoadToken = new Map();
+const skyTextureCache = new Map();
 const environmentTemplates = {
   table: null,
   chair: null
@@ -213,6 +237,11 @@ const tmpBox = new THREE.Box3();
 
 const avatarCatalog = [];
 const avatarById = new Map();
+const environmentCatalog = [];
+const environmentById = new Map();
+let currentEnvironmentId = null;
+
+const timeoutPenaltyBySeat = new Map();
 
 let ws = null;
 let localClientId = null;
@@ -269,6 +298,144 @@ function currentTimerRemainingMs() {
   }
   return Math.max(0, Number(roomState.turnDeadlineTs) - Date.now());
 }
+
+const ENV_THEME_PRESETS = {
+  default_lounge: {
+    top: '#203546',
+    bottom: '#0c1218',
+    key: { color: 0xffe4ba, intensity: 1.2, pos: [4.2, 7.8, 4.0] },
+    fill: { color: 0x8aaed2, intensity: 0.36, pos: [-5.8, 6.1, -3.7] },
+    rim: { color: 0xf8c98c, intensity: 0.26, pos: [0, 4.8, -7.8] },
+    ambient: { sky: 0xffefd2, ground: 0x294357, intensity: 0.54 },
+    fog: { color: '#101720', near: 18, far: 62 }
+  },
+  witch_parlor: {
+    top: '#3a2a53',
+    bottom: '#141020',
+    key: { color: 0xcca3ff, intensity: 1.03, pos: [3.7, 7.0, 4.8] },
+    fill: { color: 0x6fbf8b, intensity: 0.24, pos: [-5.4, 4.7, -4.2] },
+    rim: { color: 0xa57dff, intensity: 0.28, pos: [0, 4.5, -7.5] },
+    ambient: { sky: 0xc9b3ff, ground: 0x1e1730, intensity: 0.46 },
+    fog: { color: '#1a1530', near: 16, far: 58 }
+  },
+  zombie_graveyard: {
+    top: '#1b2433',
+    bottom: '#0a0f17',
+    key: { color: 0x9cc5ff, intensity: 0.98, pos: [5.2, 8.7, 3.5] },
+    fill: { color: 0x7fb58b, intensity: 0.3, pos: [-5.3, 5.0, -5.8] },
+    rim: { color: 0x9de8a8, intensity: 0.22, pos: [0, 5.3, -8.2] },
+    ambient: { sky: 0xceddf7, ground: 0x1b2836, intensity: 0.46 },
+    fog: { color: '#0f1620', near: 14, far: 50 }
+  },
+  pirate_cove: {
+    top: '#1f3340',
+    bottom: '#0d131a',
+    key: { color: 0xf7cf97, intensity: 1.15, pos: [4.8, 7.5, 3.9] },
+    fill: { color: 0x7ea8d7, intensity: 0.32, pos: [-6.2, 5.6, -5.8] },
+    rim: { color: 0xf0b26f, intensity: 0.25, pos: [0, 4.9, -8.6] },
+    ambient: { sky: 0xf3dbb2, ground: 0x203446, intensity: 0.5 },
+    fog: { color: '#0f171f', near: 15, far: 55 }
+  },
+  cowboy_saloon: {
+    top: '#4a2f20',
+    bottom: '#1b120c',
+    key: { color: 0xffd295, intensity: 1.22, pos: [4.3, 6.8, 4.6] },
+    fill: { color: 0xc39f7b, intensity: 0.28, pos: [-4.8, 5.6, -4.2] },
+    rim: { color: 0xf8b870, intensity: 0.23, pos: [0, 4.7, -7.2] },
+    ambient: { sky: 0xf5d5a7, ground: 0x3f291e, intensity: 0.5 },
+    fog: { color: '#21170f', near: 18, far: 64 }
+  },
+  ninja_dojo: {
+    top: '#272e38',
+    bottom: '#11161d',
+    key: { color: 0xf5dfb9, intensity: 1.08, pos: [3.8, 7.4, 4.2] },
+    fill: { color: 0x91a7b8, intensity: 0.3, pos: [-5.8, 5.2, -4.6] },
+    rim: { color: 0xd8bd8a, intensity: 0.2, pos: [0, 4.4, -7.0] },
+    ambient: { sky: 0xe8dfcb, ground: 0x252b34, intensity: 0.5 },
+    fog: { color: '#181e26', near: 20, far: 65 }
+  },
+  knight_castle: {
+    top: '#4f5562',
+    bottom: '#1c2028',
+    key: { color: 0xf8e0ba, intensity: 1.08, pos: [4.5, 7.9, 4.0] },
+    fill: { color: 0x90a2be, intensity: 0.31, pos: [-5.6, 5.3, -4.5] },
+    rim: { color: 0xe2ba82, intensity: 0.22, pos: [0, 4.8, -7.8] },
+    ambient: { sky: 0xe0e6ef, ground: 0x2a313d, intensity: 0.5 },
+    fog: { color: '#1d232d', near: 18, far: 62 }
+  },
+  goblin_cave: {
+    top: '#243329',
+    bottom: '#0f1612',
+    key: { color: 0x8ee1a2, intensity: 1.02, pos: [4.7, 7.2, 4.4] },
+    fill: { color: 0x5fa36f, intensity: 0.28, pos: [-6.0, 5.7, -4.8] },
+    rim: { color: 0x79cc8b, intensity: 0.24, pos: [0, 4.8, -8.2] },
+    ambient: { sky: 0xcde7d3, ground: 0x1e2d23, intensity: 0.47 },
+    fog: { color: '#131f17', near: 15, far: 52 }
+  },
+  elf_forest: {
+    top: '#2d4537',
+    bottom: '#101913',
+    key: { color: 0xbce9bf, intensity: 1.05, pos: [4.3, 7.6, 3.8] },
+    fill: { color: 0x82b29a, intensity: 0.29, pos: [-5.3, 5.3, -5.0] },
+    rim: { color: 0xa6eab0, intensity: 0.2, pos: [0, 4.8, -7.8] },
+    ambient: { sky: 0xd8f0d8, ground: 0x1d2a20, intensity: 0.5 },
+    fog: { color: '#142016', near: 15, far: 54 }
+  },
+  wizard_tower: {
+    top: '#2a385f',
+    bottom: '#11182a',
+    key: { color: 0xa6c8ff, intensity: 1.08, pos: [4.6, 7.9, 3.6] },
+    fill: { color: 0x6f98ff, intensity: 0.28, pos: [-5.8, 5.4, -4.8] },
+    rim: { color: 0x8bb2ff, intensity: 0.26, pos: [0, 4.8, -8.4] },
+    ambient: { sky: 0xc8d8fa, ground: 0x1f2943, intensity: 0.48 },
+    fog: { color: '#151d2f', near: 18, far: 58 }
+  },
+  hospital_clinic: {
+    top: '#3a596f',
+    bottom: '#182733',
+    key: { color: 0xe9f8ff, intensity: 1.1, pos: [3.9, 7.5, 4.3] },
+    fill: { color: 0xa6cbde, intensity: 0.37, pos: [-5.5, 5.8, -4.0] },
+    rim: { color: 0x9dd7ff, intensity: 0.17, pos: [0, 4.8, -7.0] },
+    ambient: { sky: 0xe8f7ff, ground: 0x29495b, intensity: 0.56 },
+    fog: { color: '#1d3040', near: 24, far: 72 }
+  },
+  battlefield: {
+    top: '#524d47',
+    bottom: '#1a1918',
+    key: { color: 0xf8d8bf, intensity: 1.08, pos: [4.8, 7.4, 4.8] },
+    fill: { color: 0xb5a695, intensity: 0.3, pos: [-6.2, 5.8, -4.2] },
+    rim: { color: 0xe09d84, intensity: 0.24, pos: [0, 4.9, -7.5] },
+    ambient: { sky: 0xefe1d5, ground: 0x3b352f, intensity: 0.48 },
+    fog: { color: '#252220', near: 16, far: 56 }
+  },
+  kitchen: {
+    top: '#4a3b2a',
+    bottom: '#1d1711',
+    key: { color: 0xffdda8, intensity: 1.2, pos: [4.1, 7.1, 4.4] },
+    fill: { color: 0xc6ad8a, intensity: 0.3, pos: [-5.3, 5.4, -3.8] },
+    rim: { color: 0xffc184, intensity: 0.2, pos: [0, 4.4, -7.0] },
+    ambient: { sky: 0xf6e4c9, ground: 0x382a1e, intensity: 0.5 },
+    fog: { color: '#20170f', near: 20, far: 64 }
+  },
+  modern_office: {
+    top: '#405265',
+    bottom: '#18222b',
+    key: { color: 0xdde8f7, intensity: 1.13, pos: [4.4, 7.7, 4.2] },
+    fill: { color: 0xa6bed5, intensity: 0.34, pos: [-6.0, 5.8, -4.4] },
+    rim: { color: 0xb6d1ea, intensity: 0.18, pos: [0, 4.8, -7.4] },
+    ambient: { sky: 0xdce9f5, ground: 0x2a3a48, intensity: 0.54 },
+    fog: { color: '#1b2832', near: 24, far: 75 }
+  },
+  viking_longhouse: {
+    top: '#4f3b2a',
+    bottom: '#1a120d',
+    key: { color: 0xffc589, intensity: 1.2, pos: [4.2, 6.9, 4.7] },
+    fill: { color: 0xc49b73, intensity: 0.27, pos: [-5.5, 5.2, -3.9] },
+    rim: { color: 0xf0a86c, intensity: 0.24, pos: [0, 4.4, -7.6] },
+    ambient: { sky: 0xf1ddc1, ground: 0x35251a, intensity: 0.48 },
+    fog: { color: '#1f150f', near: 18, far: 58 }
+  }
+};
 
 function makeNoiseTexture(size, drawFn) {
   const canvasEl = document.createElement('canvas');
@@ -330,6 +497,36 @@ const feltTexture = makeNoiseTexture(1024, (ctx, size) => {
   }
 });
 feltTexture.repeat.set(1.6, 1.6);
+
+const ivoryPatternCanvas = (() => {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#efe5d3';
+  ctx.fillRect(0, 0, c.width, c.height);
+
+  for (let i = 0; i < 2400; i += 1) {
+    const x = Math.random() * c.width;
+    const y = Math.random() * c.height;
+    const d = Math.random() * 1.2;
+    const tone = 208 + Math.floor(Math.random() * 28);
+    ctx.fillStyle = `rgba(${tone}, ${tone - 8}, ${tone - 22}, ${0.06 + Math.random() * 0.06})`;
+    ctx.fillRect(x, y, d + 1, d + 1);
+  }
+
+  for (let i = 0; i < 220; i += 1) {
+    const x = Math.random() * c.width;
+    const y = Math.random() * c.height;
+    const arc = 12 + Math.random() * 38;
+    ctx.strokeStyle = `rgba(173, 150, 123, ${0.04 + Math.random() * 0.05})`;
+    ctx.lineWidth = 1.1 + Math.random() * 1.4;
+    ctx.beginPath();
+    ctx.arc(x, y, arc, Math.random() * Math.PI, Math.random() * Math.PI * 2);
+    ctx.stroke();
+  }
+  return c;
+})();
 
 function buildTableMaterial(kind) {
   if (kind === 'felt') {
@@ -584,14 +781,17 @@ function showSections() {
     show.game = true;
     show.room = true;
   } else if (roomState.phase === PHASES.BIDDING) {
+    show.game = true;
     show.bidding = true;
   } else if (roomState.phase === PHASES.CHOOSE_MODE || roomState.phase === PHASES.CHOOSE_TRUMP) {
+    show.game = true;
     show.trump = true;
   } else if (roomState.phase === PHASES.PLAYING) {
     show.game = true;
     show.marks = true;
     show.room = true;
   } else {
+    show.game = true;
     show.marks = true;
     show.room = true;
   }
@@ -682,11 +882,26 @@ function drawPips(ctx, value, xCenter, color) {
   };
 
   const positions = layout[value] || [];
-  ctx.fillStyle = color;
   for (const [x, y] of positions) {
+    const px = xCenter + x * 185;
+    const py = 128 + y * 205;
+
+    // Slightly inset-look pips with micro highlights.
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
     ctx.beginPath();
-    ctx.arc(xCenter + x * 185, 128 + y * 205, 12, 0, Math.PI * 2);
+    ctx.arc(px + 0.7, py + 0.9, 13.2, 0, Math.PI * 2);
     ctx.fill();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(px, py, 12.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(px - 1.6, py - 1.2, 7.5, Math.PI * 1.1, Math.PI * 1.8);
+    ctx.stroke();
   }
 }
 
@@ -720,10 +935,20 @@ function getDominoTexture(tile, options = {}) {
       ctx.fill();
     }
   } else {
-    ctx.fillStyle = '#f6f0e6';
+    const ivoryPattern = ctx.createPattern(ivoryPatternCanvas, 'repeat');
+    ctx.fillStyle = ivoryPattern || '#efe5d3';
     ctx.fillRect(0, 0, c.width, c.height);
-    ctx.strokeStyle = '#1f1f1f';
-    ctx.lineWidth = 9;
+
+    const edgeFade = ctx.createLinearGradient(0, 0, 512, 0);
+    edgeFade.addColorStop(0, 'rgba(99, 79, 58, 0.1)');
+    edgeFade.addColorStop(0.1, 'rgba(255,255,255,0)');
+    edgeFade.addColorStop(0.9, 'rgba(255,255,255,0)');
+    edgeFade.addColorStop(1, 'rgba(99, 79, 58, 0.1)');
+    ctx.fillStyle = edgeFade;
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    ctx.strokeStyle = '#5a4632';
+    ctx.lineWidth = 7.5;
     ctx.strokeRect(8, 8, c.width - 16, c.height - 16);
 
     if (glowCount) {
@@ -737,15 +962,15 @@ function getDominoTexture(tile, options = {}) {
       ctx.fillRect(0, 0, c.width, c.height);
     }
 
-    ctx.strokeStyle = '#333';
+    ctx.strokeStyle = '#5c4a39';
     ctx.lineWidth = 6;
     ctx.beginPath();
     ctx.moveTo(256, 12);
     ctx.lineTo(256, 244);
     ctx.stroke();
 
-    const leftColor = trumpSuit != null && tile.a === trumpSuit ? '#cf3df6' : pipColor;
-    const rightColor = trumpSuit != null && tile.b === trumpSuit ? '#cf3df6' : pipColor;
+    const leftColor = trumpSuit != null && tile.a === trumpSuit ? '#cf3df6' : '#141311';
+    const rightColor = trumpSuit != null && tile.b === trumpSuit ? '#cf3df6' : '#141311';
     drawPips(ctx, tile.a, 128, leftColor);
     drawPips(ctx, tile.b, 384, rightColor);
   }
@@ -781,9 +1006,9 @@ function createDominoMesh(tile, options = {}) {
     trumpSuit: null
   });
 
-  const sideMat = new THREE.MeshStandardMaterial({ color: faceUp ? 0xf2ece1 : 0x2f3f4d, roughness: 0.9, metalness: 0.06 });
-  const topMat = new THREE.MeshStandardMaterial({ map: topTexture, roughness: 0.78, metalness: 0.03 });
-  const bottomMat = new THREE.MeshStandardMaterial({ map: bottomTexture, roughness: 0.9, metalness: 0.03 });
+  const sideMat = new THREE.MeshStandardMaterial({ color: faceUp ? 0xe9dcc7 : 0x2f3f4d, roughness: 0.57, metalness: 0.0 });
+  const topMat = new THREE.MeshStandardMaterial({ map: topTexture, color: 0xffffff, roughness: 0.55, metalness: 0.0 });
+  const bottomMat = new THREE.MeshStandardMaterial({ map: bottomTexture, roughness: 0.88, metalness: 0.0 });
   const mats = [sideMat, sideMat, topMat, bottomMat, sideMat, sideMat];
 
   const mesh = new THREE.Mesh(dominoGeometry, mats);
@@ -839,10 +1064,11 @@ function normalizeAvatarModel(model, targetHeight = 1.68) {
 }
 
 function applyStaticSeatedPose(model) {
-  model.rotation.x = -0.16;
-  model.scale.y *= 0.82;
+  model.rotation.x = -0.2;
+  model.scale.y *= 0.76;
   tmpBox.setFromObject(model);
   model.position.y -= tmpBox.min.y;
+  model.position.y -= 0.06;
 }
 
 function tuneImportedMaterials(root) {
@@ -1085,7 +1311,7 @@ function setChairModelForSeat(seatIndex, chairTemplate) {
   }
 
   group.add(clone);
-  seatRuntime[seatIndex].chairSeatY = findSeatAnchorY(clone);
+  seatRuntime[seatIndex].chairSeatY = Math.min(findSeatAnchorY(clone), tableMetrics.topY - 0.28);
 }
 
 async function loadEnvironmentModels() {
@@ -1167,6 +1393,7 @@ async function loadEnvironmentModels() {
   }
 
   updateSeatTransforms();
+  resetViewForLocalSeat(false);
 }
 
 function updateSeatTransforms() {
@@ -1180,17 +1407,319 @@ function updateSeatTransforms() {
     chairGroup.rotation.y = seatConfig.chair.rotY;
 
     const avatarGroup = avatarSeatGroups[seatIndex];
-    let avatarBaseY = seatConfig.avatar.pos[1] + seatRuntime[seatIndex].chairSeatY + 0.03;
+    let avatarBaseY = seatConfig.avatar.pos[1] + seatRuntime[seatIndex].chairSeatY + 0.02;
+    avatarBaseY = Math.min(avatarBaseY, tableMetrics.topY - 0.28);
     avatarBaseY = clampAvatarBaseY(avatarBaseY, seatIndex);
     avatarGroup.position.set(seatConfig.avatar.pos[0], avatarBaseY, seatConfig.avatar.pos[2]);
     if (avatarBaseY >= tableMetrics.topY - 0.11) {
-      avatarGroup.position.x *= 1.08;
-      avatarGroup.position.z *= 1.08;
+      avatarGroup.position.x *= 1.18;
+      avatarGroup.position.z *= 1.18;
+      avatarGroup.position.y = tableMetrics.topY - 0.18;
     }
     avatarGroup.rotation.y = seatConfig.avatar.rotY;
   }
 
   updateNameplatePositions();
+  updatePenaltyEmojiPositions();
+}
+
+function cameraAnchorForSeat(seatIndex) {
+  const localSeat = getLocalSeat();
+  const rel = toRelativeSeat(seatIndex ?? 0, localSeat);
+  return SEATS[rel]?.camera || SEATS[0].camera;
+}
+
+function resetViewForLocalSeat(immediate = true) {
+  const localSeat = getLocalSeat();
+  const seatIndex = Number.isInteger(localSeat) ? localSeat : 0;
+  const anchor = cameraAnchorForSeat(seatIndex);
+  const lookTarget = anchor?.lookAt || [0, 0.78, 0];
+  const targetY = Math.max(0.74, Math.min(tableMetrics.topY + 0.06, lookTarget[1]));
+  const nextPos = new THREE.Vector3(anchor.pos[0], anchor.pos[1], anchor.pos[2]);
+  const nextTarget = new THREE.Vector3(lookTarget[0], targetY, lookTarget[2]);
+
+  if (immediate) {
+    camera.position.copy(nextPos);
+    controls.target.copy(nextTarget);
+  } else {
+    camera.position.lerp(nextPos, 0.22);
+    controls.target.lerp(nextTarget, 0.22);
+  }
+  controls.update();
+}
+
+function getSeatHeadWorld(seatIndex, out = new THREE.Vector3()) {
+  const avatarGroup = avatarSeatGroups[seatIndex];
+  if (!avatarGroup || !avatarGroup.children.length) {
+    const localSeat = getLocalSeat();
+    const rel = toRelativeSeat(seatIndex, localSeat);
+    const fallback = SEATS[rel]?.nameplateAnchor?.pos || [0, 1.9, 0];
+    out.set(fallback[0], fallback[1], fallback[2]);
+    tableRoot.localToWorld(out);
+    return out;
+  }
+
+  const bbox = new THREE.Box3().setFromObject(avatarGroup);
+  if (!Number.isFinite(bbox.max.y)) {
+    out.copy(avatarGroup.position);
+    out.y += 1.7;
+    return out;
+  }
+  out.set(
+    (bbox.min.x + bbox.max.x) * 0.5,
+    bbox.max.y + 0.16,
+    (bbox.min.z + bbox.max.z) * 0.5
+  );
+  return out;
+}
+
+function showTimeoutPenaltyEmoji(seatIndex, emoji = '🤡', durationMs = 3000, activeTurnId = null) {
+  if (!Number.isInteger(seatIndex)) return;
+  const existing = timeoutPenaltyBySeat.get(seatIndex);
+  const expiresAt = Date.now() + Math.max(500, Number(durationMs) || 3000);
+  if (existing?.el) {
+    existing.el.textContent = emoji;
+    existing.expiresAt = expiresAt;
+    existing.activeTurnId = activeTurnId;
+    existing.el.style.animation = 'none';
+    existing.el.offsetHeight;
+    existing.el.style.animation = '';
+    return;
+  }
+
+  const el = document.createElement('div');
+  el.className = 'penaltyEmoji';
+  el.textContent = emoji;
+  emojiOverlays.appendChild(el);
+  timeoutPenaltyBySeat.set(seatIndex, { el, expiresAt, activeTurnId });
+}
+
+function clearTimeoutPenaltyEmojis() {
+  for (const value of timeoutPenaltyBySeat.values()) {
+    value.el?.remove();
+  }
+  timeoutPenaltyBySeat.clear();
+}
+
+function updatePenaltyEmojiPositions() {
+  const now = Date.now();
+  for (const [seatIndex, data] of timeoutPenaltyBySeat.entries()) {
+    if (!data?.el || data.expiresAt <= now) {
+      data?.el?.remove();
+      timeoutPenaltyBySeat.delete(seatIndex);
+      continue;
+    }
+
+    getSeatHeadWorld(seatIndex, tmpV3B);
+    projectWorldToScreen(tmpV3B, data);
+    data.el.style.left = `${data.x}px`;
+    data.el.style.top = `${data.y}px`;
+  }
+}
+
+function getThemePreset(environmentId) {
+  return ENV_THEME_PRESETS[environmentId] || ENV_THEME_PRESETS.default_lounge;
+}
+
+function getSkyTexture(environmentId, top, bottom) {
+  const key = `${environmentId}:${top}:${bottom}`;
+  if (skyTextureCache.has(key)) return skyTextureCache.get(key);
+
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 512;
+  const ctx = c.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, c.height);
+  grad.addColorStop(0, top);
+  grad.addColorStop(1, bottom);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, c.width, c.height);
+
+  for (let i = 0; i < 2400; i += 1) {
+    const x = Math.random() * c.width;
+    const y = Math.random() * c.height;
+    const alpha = 0.016 + Math.random() * 0.04;
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.fillRect(x, y, 1, 1);
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  skyTextureCache.set(key, tex);
+  return tex;
+}
+
+function makeCandle(x, z, colorHex) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.07, 0.45, 10),
+    new THREE.MeshStandardMaterial({ color: 0xdcc5a1, roughness: 0.8, metalness: 0.0 })
+  );
+  body.position.y = 0.22;
+  const flame = new THREE.PointLight(colorHex, 0.55, 5.8, 2);
+  flame.position.y = 0.52;
+  g.add(body, flame);
+  g.position.set(x, 0, z);
+  body.castShadow = true;
+  return g;
+}
+
+function applyEnvironment(environmentId) {
+  const safeId = environmentById.has(environmentId) ? environmentId : 'default_lounge';
+  if (currentEnvironmentId === safeId) return;
+  currentEnvironmentId = safeId;
+
+  clearGroup(themeGroup);
+  const preset = getThemePreset(safeId);
+
+  const skyTex = getSkyTexture(safeId, preset.top, preset.bottom);
+  const skyDome = new THREE.Mesh(
+    new THREE.SphereGeometry(56, 36, 20),
+    new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, depthWrite: false })
+  );
+  themeGroup.add(skyDome);
+  scene.background = new THREE.Color(preset.bottom);
+
+  ambient.color.setHex(preset.ambient.sky);
+  ambient.groundColor.setHex(preset.ambient.ground);
+  ambient.intensity = preset.ambient.intensity;
+
+  keyLight.color.setHex(preset.key.color);
+  keyLight.intensity = preset.key.intensity;
+  keyLight.position.set(...preset.key.pos);
+
+  fillLight.color.setHex(preset.fill.color);
+  fillLight.intensity = preset.fill.intensity;
+  fillLight.position.set(...preset.fill.pos);
+
+  rimLight.color.setHex(preset.rim.color);
+  rimLight.intensity = preset.rim.intensity;
+  rimLight.position.set(...preset.rim.pos);
+
+  scene.fog = new THREE.Fog(preset.fog.color, preset.fog.near, preset.fog.far);
+
+  const backgroundStage = new THREE.Group();
+  const backPanel = new THREE.Mesh(
+    new THREE.PlaneGeometry(24, 10),
+    new THREE.MeshStandardMaterial({
+      color: 0x11161c,
+      emissive: new THREE.Color(preset.top),
+      emissiveIntensity: 0.2,
+      roughness: 0.9,
+      metalness: 0.0
+    })
+  );
+  backPanel.position.set(0, 2.6, -11.5);
+  backgroundStage.add(backPanel);
+
+  const addLantern = (x, z, warm = 0xffc37e) => {
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.09, 2.2, 10),
+      new THREE.MeshStandardMaterial({ map: woodTexture, color: 0xffffff, roughness: 0.62, metalness: 0.0 })
+    );
+    pole.position.set(x, 1.1, z);
+    const orb = new THREE.Mesh(
+      new THREE.SphereGeometry(0.2, 14, 12),
+      new THREE.MeshStandardMaterial({ color: 0xf8ddb4, emissive: warm, emissiveIntensity: 0.35, roughness: 0.4 })
+    );
+    orb.position.set(x, 2.15, z);
+    const lamp = new THREE.PointLight(warm, 0.45, 8.8, 2);
+    lamp.position.set(x, 2.2, z);
+    backgroundStage.add(pole, orb, lamp);
+  };
+
+  switch (safeId) {
+    case 'witch_parlor':
+      backgroundStage.add(makeCandle(-3.2, -8.8, 0xba77ff));
+      backgroundStage.add(makeCandle(0.0, -9.3, 0x9cfa74));
+      backgroundStage.add(makeCandle(3.2, -8.7, 0xba77ff));
+      break;
+    case 'zombie_graveyard': {
+      const moon = new THREE.Mesh(
+        new THREE.SphereGeometry(1.2, 24, 18),
+        new THREE.MeshStandardMaterial({ color: 0xd7e6ff, emissive: 0x9bbfff, emissiveIntensity: 0.42, roughness: 0.84 })
+      );
+      moon.position.set(-7.8, 7.1, -15.5);
+      backgroundStage.add(moon);
+      for (let i = 0; i < 3; i += 1) {
+        const fogPlane = new THREE.Mesh(
+          new THREE.PlaneGeometry(13, 2.3),
+          new THREE.MeshBasicMaterial({ color: 0xc9d8df, transparent: true, opacity: 0.12, depthWrite: false })
+        );
+        fogPlane.position.set(-6 + i * 6, 0.9 + i * 0.15, -8.6 - i * 1.4);
+        backgroundStage.add(fogPlane);
+      }
+      break;
+    }
+    case 'pirate_cove':
+      addLantern(-4.8, -9.0, 0xffcf82);
+      addLantern(4.8, -8.7, 0xffcf82);
+      break;
+    case 'cowboy_saloon':
+      addLantern(-4.5, -8.9, 0xffbd70);
+      addLantern(4.5, -8.9, 0xffbd70);
+      break;
+    case 'ninja_dojo': {
+      const panel = new THREE.Mesh(
+        new THREE.PlaneGeometry(16, 7),
+        new THREE.MeshStandardMaterial({ color: 0x2a3038, roughness: 0.92, metalness: 0.0 })
+      );
+      panel.position.set(0, 2.8, -10.9);
+      backgroundStage.add(panel);
+      break;
+    }
+    case 'knight_castle': {
+      for (let i = -1; i <= 1; i += 1) {
+        const banner = new THREE.Mesh(
+          new THREE.PlaneGeometry(1.0, 2.4),
+          new THREE.MeshStandardMaterial({ color: 0x6b2d2d, roughness: 0.88 })
+        );
+        banner.position.set(i * 2.1, 3.5, -10.8);
+        backgroundStage.add(banner);
+      }
+      break;
+    }
+    case 'goblin_cave':
+      backgroundStage.add(makeCandle(-3.4, -8.9, 0x77ff96));
+      backgroundStage.add(makeCandle(3.4, -8.9, 0x77ff96));
+      break;
+    case 'elf_forest':
+      addLantern(-3.6, -8.7, 0x9ee8a9);
+      addLantern(3.6, -8.5, 0x9ee8a9);
+      break;
+    case 'wizard_tower':
+      addLantern(-3.5, -8.8, 0x7ea7ff);
+      addLantern(3.5, -8.8, 0x7ea7ff);
+      break;
+    case 'hospital_clinic':
+      addLantern(-2.8, -8.7, 0xaad6ff);
+      addLantern(2.8, -8.7, 0xaad6ff);
+      break;
+    case 'battlefield':
+      addLantern(-4.0, -8.7, 0xff9e7d);
+      addLantern(4.0, -8.7, 0xff9e7d);
+      break;
+    case 'kitchen':
+      addLantern(-2.9, -8.7, 0xffc994);
+      addLantern(2.9, -8.7, 0xffc994);
+      break;
+    case 'modern_office':
+      addLantern(-3.2, -8.8, 0xa7c7e9);
+      addLantern(3.2, -8.8, 0xa7c7e9);
+      break;
+    case 'viking_longhouse':
+      addLantern(-3.6, -8.8, 0xffb071);
+      addLantern(3.6, -8.8, 0xffb071);
+      break;
+    default:
+      addLantern(-3.2, -8.7, 0xf1c786);
+      addLantern(3.2, -8.7, 0xf1c786);
+      break;
+  }
+
+  themeGroup.add(backgroundStage);
+  updateEnvironmentControls();
 }
 
 function renderAvatars() {
@@ -1223,16 +1752,24 @@ function renderHandsAndTrick() {
 
   if (myHand.length) {
     const seatAnchor = SEATS[0].handAnchor;
-    const spacing = 1.22;
+    const spacing = 1.08;
     const startOffset = -((myHand.length - 1) * spacing) / 2;
 
     myHand.forEach((tile, index) => {
       const mesh = createDominoMesh(tile, {
         faceUp: true,
-        glowCount: countTilePoints(tile) > 0
+        glowCount: countTilePoints(tile) > 0,
+        scale: 1.09
       });
-      mesh.position.set(seatAnchor.pos[0] + startOffset + index * spacing, DOMINO_Y, seatAnchor.pos[2]);
-      mesh.rotation.y = seatAnchor.rotY;
+      const t = myHand.length <= 1 ? 0 : (index / (myHand.length - 1)) * 2 - 1;
+      const arcLift = Math.abs(t) * 0.012;
+      const arcForward = Math.abs(t) * 0.2;
+      mesh.position.set(
+        seatAnchor.pos[0] + startOffset + index * spacing,
+        DOMINO_Y + 0.055 + arcLift,
+        seatAnchor.pos[2] - 0.06 + arcForward
+      );
+      mesh.rotation.y = seatAnchor.rotY + t * 0.14;
       mesh.userData.tileId = tile.id;
       mesh.userData.seatIndex = localSeat;
       mesh.userData.clickable = true;
@@ -1272,7 +1809,7 @@ function renderHandsAndTrick() {
       trumpSuit: roomState.trumpSuit,
       useMagentaTrump: roomState.mode === MODES.TRUMPS
     });
-    mesh.position.set(pos.x, DOMINO_Y, pos.z);
+    mesh.position.set(pos.x, DOMINO_Y + 0.03, pos.z);
     mesh.rotation.y = rel === 1 ? -Math.PI / 2 : rel === 3 ? Math.PI / 2 : rel === 2 ? Math.PI : 0;
     trickGroup.add(mesh);
   });
@@ -1323,6 +1860,7 @@ function updateHud() {
     updateScoreboard();
     updateMarksMenu();
     updateTimerControls();
+    updateEnvironmentControls();
     return;
   }
 
@@ -1332,6 +1870,7 @@ function updateHud() {
   updateScoreboard();
   updateMarksMenu();
   updateTimerControls();
+  updateEnvironmentControls();
 }
 
 function updateTimerControls() {
@@ -1362,6 +1901,43 @@ function updateTimerHud() {
   }
   const remaining = currentTimerRemainingMs();
   turnTimerHud.textContent = `TIME: ${formatTimerMs(remaining)}`;
+}
+
+function updateEnvironmentControls() {
+  if (!environmentCatalog.length) {
+    environmentSelect.innerHTML = '<option value="default_lounge">default_lounge</option>';
+    environmentSelect.disabled = true;
+    environmentPreview.removeAttribute('src');
+    environmentStateText.textContent = 'Loading backgrounds...';
+    return;
+  }
+
+  if (environmentSelect.options.length !== environmentCatalog.length) {
+    environmentSelect.innerHTML = environmentCatalog
+      .map((entry) => `<option value="${entry.id}">${entry.name}</option>`)
+      .join('');
+  }
+
+  const activeId = roomState?.environmentId || currentEnvironmentId || environmentCatalog[0].id;
+  const safeId = environmentById.has(activeId) ? activeId : environmentCatalog[0].id;
+  environmentSelect.value = safeId;
+  const entry = environmentById.get(safeId);
+
+  if (entry?.preview) {
+    environmentPreview.src = entry.preview;
+  } else {
+    environmentPreview.removeAttribute('src');
+  }
+
+  const isHost = roomState?.hostClientId === localClientId;
+  environmentSelect.disabled = !roomState || !isHost;
+  if (!roomState) {
+    environmentStateText.textContent = `Current: ${entry?.name || safeId}`;
+  } else if (isHost) {
+    environmentStateText.textContent = `Host selected: ${entry?.name || safeId}`;
+  } else {
+    environmentStateText.textContent = `Host controls background (${entry?.name || safeId})`;
+  }
 }
 
 function updateNameplates() {
@@ -1726,6 +2302,7 @@ function applyStoredNameIfNeeded() {
 }
 
 function applySnapshot(room) {
+  const prevPhase = roomState?.phase || null;
   const prevLocalSeat = lastLocalSeat;
   roomState = room;
 
@@ -1735,6 +2312,7 @@ function applySnapshot(room) {
     storedAvatarAppliedSeat = null;
     storedNameAppliedSeat = null;
     updateSeatTransforms();
+    resetViewForLocalSeat(true);
   }
 
   if (selectedDominoTileId && newLocalSeat != null) {
@@ -1744,8 +2322,21 @@ function applySnapshot(room) {
     }
   }
 
+  if (roomState.phase === PHASES.PLAYING && prevPhase !== PHASES.PLAYING) {
+    resetViewForLocalSeat(true);
+  }
+
   applyStoredAvatarIfNeeded();
   applyStoredNameIfNeeded();
+  applyEnvironment(roomState.environmentId || 'default_lounge');
+  if (roomState.timeoutPenalty && Number.isInteger(roomState.timeoutPenalty.seat)) {
+    showTimeoutPenaltyEmoji(
+      roomState.timeoutPenalty.seat,
+      roomState.timeoutPenalty.emoji || '🤡',
+      Number(roomState.timeoutPenalty.remainingMs || roomState.timeoutPenalty.durationMs || 3000),
+      roomState.timeoutPenalty.activeTurnId ?? null
+    );
+  }
   updatePanelAutoBehavior();
   showSections();
   updateHud();
@@ -1778,12 +2369,15 @@ function connect() {
     roomState = null;
     localClientId = null;
     lastLocalSeat = null;
+    clearTimeoutPenaltyEmojis();
+    applyEnvironment('default_lounge');
     updateHud();
     showSections();
     setPanelOpen(true);
     renderHandsAndTrick();
     updateNameplates();
     renderAvatars();
+    resetViewForLocalSeat(true);
   });
 
   ws.addEventListener('message', (event) => {
@@ -1834,6 +2428,26 @@ function connect() {
       if (Number.isInteger(data.seat)) {
         logMessage(`Seat ${Number(data.seat) + 1} auto-played on timeout.`);
       }
+      return;
+    }
+
+    if (data.type === 'game:timeoutPenalty') {
+      if (Number.isInteger(data.seat)) {
+        showTimeoutPenaltyEmoji(
+          data.seat,
+          data.emoji || '🤡',
+          Number(data.durationMs || 3000),
+          data.activeTurnId ?? null
+        );
+      }
+      return;
+    }
+
+    if (data.type === 'game:environmentChanged') {
+      if (!roomState) return;
+      roomState.environmentId = data.environmentId || roomState.environmentId;
+      applyEnvironment(roomState.environmentId || 'default_lounge');
+      updateEnvironmentControls();
       return;
     }
 
@@ -1891,10 +2505,13 @@ function ensureButtons() {
   document.getElementById('leaveRoomBtn').addEventListener('click', () => {
     sendAction('leaveRoom');
     roomState = null;
+    clearTimeoutPenaltyEmojis();
+    applyEnvironment('default_lounge');
     showSections();
     renderHandsAndTrick();
     updateNameplates();
     renderAvatars();
+    resetViewForLocalSeat(true);
   });
 
   document.getElementById('startGameBtn').addEventListener('click', () => {
@@ -1905,6 +2522,10 @@ function ensureButtons() {
     sendAction('restartGame');
   });
 
+  resetViewBtn.addEventListener('click', () => {
+    resetViewForLocalSeat(true);
+  });
+
   timerEnabledToggle.addEventListener('change', () => {
     sendAction('host:timerEnable', { enabled: !!timerEnabledToggle.checked });
   });
@@ -1912,6 +2533,13 @@ function ensureButtons() {
   timerPauseBtn.addEventListener('click', () => {
     if (!roomState) return;
     sendAction('host:timerPause', { paused: !roomState.turnTimerPaused });
+  });
+
+  environmentSelect.addEventListener('change', () => {
+    const environmentId = environmentSelect.value;
+    if (!roomState || roomState.hostClientId !== localClientId) return;
+    if (!environmentById.has(environmentId)) return;
+    sendAction('host:setEnvironment', { environmentId });
   });
 
   panelToggle.addEventListener('click', () => {
@@ -2068,12 +2696,16 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  controls.update();
+  updatePenaltyEmojiPositions();
 }
 
 function animate() {
   requestAnimationFrame(animate);
   clock.getDelta();
+  controls.update();
   updateNameplatePositions();
+  updatePenaltyEmojiPositions();
   updateTimerHud();
   renderer.render(scene, camera);
 }
@@ -2128,6 +2760,50 @@ async function loadAvatarManifest() {
   buildAvatarPickerGrid();
 }
 
+async function loadEnvironmentManifest() {
+  let entries = [];
+  try {
+    const res = await fetch('/assets/environments/environments.json', { cache: 'no-cache' });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        entries = data
+          .filter((entry) => entry?.id)
+          .map((entry) => ({
+            id: String(entry.id),
+            name: String(entry.name || entry.id),
+            preview: entry.preview ? String(entry.preview) : ''
+          }));
+      }
+    }
+  } catch {
+    entries = [];
+  }
+
+  if (!entries.length) {
+    entries = Object.keys(ENV_THEME_PRESETS).map((id) => ({
+      id,
+      name: id.replace(/_/g, ' '),
+      preview: ''
+    }));
+  }
+
+  environmentCatalog.length = 0;
+  environmentById.clear();
+  entries.forEach((entry) => {
+    environmentCatalog.push(entry);
+    environmentById.set(entry.id, entry);
+  });
+  if (!environmentById.has('default_lounge') && environmentCatalog.length) {
+    const first = environmentCatalog[0];
+    environmentById.set('default_lounge', first);
+  }
+
+  updateEnvironmentControls();
+  const targetEnv = roomState?.environmentId || 'default_lounge';
+  applyEnvironment(targetEnv);
+}
+
 window.addEventListener('resize', onResize);
 
 initHdrEnvironment();
@@ -2138,9 +2814,11 @@ setPanelOpen(true);
 updateScoreboard();
 updateTimerControls();
 updateTimerHud();
+updateEnvironmentControls();
+resetViewForLocalSeat(true);
 connect();
 
-Promise.all([loadAvatarManifest(), loadEnvironmentModels()])
+Promise.all([loadAvatarManifest(), loadEnvironmentManifest(), loadEnvironmentModels()])
   .then(() => {
     renderSeatControls();
     renderAvatars();

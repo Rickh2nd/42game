@@ -35,6 +35,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 const AVATAR_MANIFEST_PATH = path.join(ROOT_DIR, 'client', 'assets', 'avatars', 'manifest.json');
+const ENVIRONMENT_MANIFEST_PATH = path.join(ROOT_DIR, 'client', 'assets', 'environments', 'environments.json');
+const FALLBACK_ENVIRONMENT_IDS = [
+  'default_lounge',
+  'witch_parlor',
+  'zombie_graveyard',
+  'pirate_cove',
+  'cowboy_saloon',
+  'ninja_dojo',
+  'knight_castle',
+  'goblin_cave',
+  'elf_forest',
+  'wizard_tower',
+  'hospital_clinic',
+  'battlefield',
+  'kitchen',
+  'modern_office',
+  'viking_longhouse'
+];
 
 const app = express();
 app.use('/assets', express.static(path.join(ROOT_DIR, 'client', 'assets'), { fallthrough: false }));
@@ -68,6 +86,8 @@ let clientCounter = 1;
 const PORT = Number(process.env.PORT || 8080);
 const avatarManifestIds = loadAvatarManifestIds();
 const defaultAvatarId = avatarManifestIds.values().next().value || null;
+const environmentManifestIds = loadEnvironmentManifestIds();
+const defaultEnvironmentId = environmentManifestIds.values().next().value || 'default_lounge';
 const TURN_TIMER_DEFAULT_MS = 60000;
 const TURN_TIMER_TICK_MS = 500;
 
@@ -79,6 +99,18 @@ function loadAvatarManifestIds() {
     return new Set(parsed.map((entry) => entry?.id).filter(Boolean));
   } catch {
     return new Set();
+  }
+}
+
+function loadEnvironmentManifestIds() {
+  try {
+    const raw = fs.readFileSync(ENVIRONMENT_MANIFEST_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set(FALLBACK_ENVIRONMENT_IDS);
+    const ids = parsed.map((entry) => entry?.id).filter(Boolean);
+    return ids.length ? new Set(ids) : new Set(FALLBACK_ENVIRONMENT_IDS);
+  } catch {
+    return new Set(FALLBACK_ENVIRONMENT_IDS);
   }
 }
 
@@ -129,6 +161,7 @@ function createRoom(roomId, hostClientId) {
     bidValue: null,
     mode: null,
     trumpSuit: null,
+    environmentId: defaultEnvironmentId,
     contract: null,
     bidHistory: [],
     bidTurnIndex: 0,
@@ -156,7 +189,8 @@ function createRoom(roomId, hostClientId) {
     turnTimeLimitMs: TURN_TIMER_DEFAULT_MS,
     turnDeadlineTs: null,
     turnRemainingMs: TURN_TIMER_DEFAULT_MS,
-    activeTurnId: 0
+    activeTurnId: 0,
+    timeoutPenalty: null
   };
 }
 
@@ -189,6 +223,7 @@ function roomPublicSnapshot(room, viewerClientId) {
   if (room.turnTimerEnabled && !room.turnTimerPaused && Number.isFinite(room.turnDeadlineTs)) {
     remainingMs = Math.max(0, Number(room.turnDeadlineTs) - Date.now());
   }
+  const timeoutPenalty = activeTimeoutPenalty(room);
 
   const handCounts = {
     0: room.hands[0]?.length || 0,
@@ -218,6 +253,7 @@ function roomPublicSnapshot(room, viewerClientId) {
     bidValue: room.bidValue,
     mode: room.mode,
     trumpSuit: room.trumpSuit,
+    environmentId: room.environmentId || defaultEnvironmentId,
     hands,
     handCounts,
     trick: room.trick.map((play) => ({
@@ -249,7 +285,11 @@ function roomPublicSnapshot(room, viewerClientId) {
     turnTimeLimitMs: limitMs,
     turnDeadlineTs: room.turnDeadlineTs == null ? null : Number(room.turnDeadlineTs),
     turnRemainingMs: remainingMs,
-    activeTurnId: Number(room.activeTurnId || 0)
+    activeTurnId: Number(room.activeTurnId || 0),
+    timeoutPenalty: timeoutPenalty ? {
+      ...timeoutPenalty,
+      remainingMs: Math.max(0, timeoutPenalty.expiresAtTs - Date.now())
+    } : null
   };
 }
 
@@ -489,6 +529,35 @@ function normalizeAvatarId(rawAvatarId) {
   return candidate;
 }
 
+function normalizeEnvironmentId(rawEnvironmentId) {
+  if (rawEnvironmentId == null || rawEnvironmentId === '') {
+    return defaultEnvironmentId;
+  }
+  const candidate = String(rawEnvironmentId).trim().toLowerCase().slice(0, 80);
+  if (!environmentManifestIds.has(candidate)) {
+    return null;
+  }
+  return candidate;
+}
+
+function activeTimeoutPenalty(room) {
+  const value = room.timeoutPenalty;
+  if (!value) return null;
+  const expiresAtTs = Number(value.expiresAtTs || 0);
+  if (!Number.isFinite(expiresAtTs) || expiresAtTs <= Date.now()) {
+    room.timeoutPenalty = null;
+    return null;
+  }
+  return {
+    seat: Number(value.seat),
+    playerId: value.playerId ?? null,
+    activeTurnId: Number(value.activeTurnId || 0),
+    emoji: value.emoji || '🤡',
+    durationMs: Number(value.durationMs || 3000),
+    expiresAtTs
+  };
+}
+
 function handIsFinished(room) {
   if (room.mode === MODES.SEVENS && room.sevensResult) return true;
   return room.activeSeats.every((seat) => (room.hands[seat] || []).length === 0);
@@ -546,6 +615,7 @@ function startNewHand(room, { resetMarks = false } = {}) {
   room.sevensState = null;
   room.sevensResult = null;
   room.lastHandOutcome = null;
+  room.timeoutPenalty = null;
 
   const first = nextSeat(room.dealerSeat);
   room.biddingOrder = [first, nextSeat(first), nextSeat(nextSeat(first)), room.dealerSeat];
@@ -1097,6 +1167,25 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
     return true;
   }
 
+  if (action === 'host:setEnvironment') {
+    if (!ensureHost(room, clientId, action)) return false;
+    const environmentId = normalizeEnvironmentId(payload.environmentId);
+    if (!environmentId) {
+      return reject('Invalid environmentId.');
+    }
+    if (room.environmentId === environmentId) {
+      return true;
+    }
+
+    room.environmentId = environmentId;
+    broadcastRoomEvent(room, {
+      type: 'game:environmentChanged',
+      environmentId
+    });
+    broadcastRoom(room);
+    return true;
+  }
+
   if (action === 'startGame') {
     if (!ensureHost(room, clientId, action)) return false;
     if (room.phase !== PHASES.LOBBY) return reject('Game already started.');
@@ -1368,6 +1457,11 @@ server.listen(PORT, () => {
 
 setInterval(() => {
   for (const room of rooms.values()) {
+    if (room.timeoutPenalty && Number(room.timeoutPenalty.expiresAtTs || 0) <= Date.now()) {
+      room.timeoutPenalty = null;
+      broadcastRoom(room);
+    }
+
     if (!room.turnTimerEnabled || room.turnTimerPaused || room.turnDeadlineTs == null) continue;
     if (!phaseUsesTurnTimer(room)) {
       syncTurnTimerForState(room, { newTurn: false });
@@ -1399,6 +1493,25 @@ setInterval(() => {
       reason: 'timeout',
       move: { tileId: worstTile.id, tile: { ...worstTile } },
       activeTurnId: timeoutTurnId
+    });
+
+    const timeoutDurationMs = 3000;
+    const playerId = seatByIndex(room, seatIndex)?.occupantClientId || null;
+    room.timeoutPenalty = {
+      seat: seatIndex,
+      playerId,
+      activeTurnId: timeoutTurnId,
+      emoji: '🤡',
+      durationMs: timeoutDurationMs,
+      expiresAtTs: Date.now() + timeoutDurationMs
+    };
+    broadcastRoomEvent(room, {
+      type: 'game:timeoutPenalty',
+      seat: seatIndex,
+      playerId,
+      activeTurnId: timeoutTurnId,
+      emoji: '🤡',
+      durationMs: timeoutDurationMs
     });
 
     handleRoomAction(

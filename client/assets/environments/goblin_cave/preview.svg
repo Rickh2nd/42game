@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 220">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#24312c"/>
+      <stop offset="100%" stop-color="#0f1412"/>
+    </linearGradient>
+  </defs>
+  <rect width="360" height="220" fill="url(#g)"/>
+  <circle cx="294" cy="54" r="20" fill="#70c177" opacity="0.65"/>
+  <rect x="44" y="144" width="272" height="20" rx="10" fill="#70c177" opacity="0.22"/>
+  <text x="180" y="206" text-anchor="middle" font-size="20" font-family="Trebuchet MS, sans-serif" fill="#f4ead8">goblin_cave</text>
+</svg>
