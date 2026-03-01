@@ -10,6 +10,8 @@
   "dependencies": {
     "adm-zip": "^0.5.16",
     "express": "^4.21.2",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
     "three": "^0.177.0",
     "ws": "^8.18.2"
   }

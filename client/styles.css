@@ -422,6 +422,40 @@ body,
   z-index: 4;
 }
 
+.socketStatusBadge {
+  pointer-events: none;
+  position: absolute;
+  right: 64px;
+  top: 14px;
+  z-index: 4;
+  min-width: 108px;
+  text-align: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(9, 14, 22, 0.78);
+  color: #dbe6f3;
+}
+
+.socketStatusBadge.connected,
+#networkStatusValue.connected {
+  color: #86f2b2;
+}
+
+.socketStatusBadge.connecting,
+#networkStatusValue.connecting {
+  color: #ffde92;
+}
+
+.socketStatusBadge.disconnected,
+#networkStatusValue.disconnected {
+  color: #ff9d9d;
+}
+
 #sidePanel {
   position: absolute;
   right: 0;
@@ -478,6 +512,41 @@ body,
   font-size: 13px;
   letter-spacing: 0.11em;
   color: var(--gold);
+}
+
+.networkBlock {
+  margin-top: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(4, 8, 13, 0.45);
+  padding: 8px;
+}
+
+.networkTitle {
+  margin-bottom: 6px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #dfc489;
+}
+
+.networkRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--subtle);
+}
+
+.networkRow code {
+  margin-left: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
+  color: #dbe7f7;
 }
 
 .modal {
@@ -724,6 +793,14 @@ button:disabled {
 }
 
 @media (max-width: 920px) {
+  .socketStatusBadge {
+    right: 62px;
+    top: 10px;
+    min-width: 90px;
+    padding: 5px 8px;
+    font-size: 10px;
+  }
+
   #scoreboard {
     top: 10px;
     width: min(96vw, 460px);
