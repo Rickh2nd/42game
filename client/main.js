@@ -1868,8 +1868,8 @@ function computeSeatedCameraPose(seatIndex, settings) {
   const seat = SEATS[rel] || SEATS[0];
   const avatarGroup = avatarSeatGroups[seatIndex];
 
-  const chairPos = tempV3A.set(seat.chair.pos[0], 0, seat.chair.pos[2]);
-  const forward = tempV3B.set(-chairPos.x, 0, -chairPos.z);
+  const chairPos = tmpV3A.set(seat.chair.pos[0], 0, seat.chair.pos[2]);
+  const forward = tmpV3B.set(-chairPos.x, 0, -chairPos.z);
   if (forward.lengthSq() < 0.0001) {
     forward.set(0, 0, -1);
   } else {
@@ -1914,6 +1914,27 @@ function computeSeatedCameraPose(seatIndex, settings) {
   return { position: pos, target };
 }
 
+function setDefaultSeatedCamera() {
+  const fallbackTargetY = Number.isFinite(tableMetrics.topY)
+    ? tableMetrics.topY + 0.16
+    : 0.78;
+  const fallbackRadius = Math.max(
+    4.8,
+    (Number.isFinite(tableMetrics.radius) ? tableMetrics.radius : 2.9) + 1.8
+  );
+  const fallbackY = Math.max(1.12, fallbackTargetY + 0.42);
+  camera.position.set(0.22, fallbackY, fallbackRadius);
+  controls.target.set(0, fallbackTargetY, 0);
+  camera.fov = DEFAULT_VIEW_SETTINGS.fov;
+  camera.near = DEFAULT_VIEW_SETTINGS.near;
+  camera.updateProjectionMatrix();
+  controls.minPolarAngle = 1.02;
+  controls.maxPolarAngle = 1.54;
+  controls.minDistance = Math.max(3.8, tableMetrics.radius + 1.02);
+  controls.maxDistance = Math.max(6.8, tableMetrics.radius + 3.8);
+  controls.update();
+}
+
 function applyViewSettings(immediate = true) {
   sanitizeViewSettings();
   const localSeat = getLocalSeat();
@@ -1939,15 +1960,30 @@ function applyViewSettings(immediate = true) {
   controls.update();
 }
 
+function safeApplyViewSettings(immediate = true) {
+  try {
+    applyViewSettings(immediate);
+    return true;
+  } catch (error) {
+    console.error('[view] applyViewSettings failed', error);
+    try {
+      setDefaultSeatedCamera();
+    } catch (fallbackError) {
+      console.error('[view] setDefaultSeatedCamera failed', fallbackError);
+    }
+    return false;
+  }
+}
+
 function resetViewForLocalSeat(immediate = true) {
-  applyViewSettings(immediate);
+  safeApplyViewSettings(immediate);
 }
 
 function resetViewSettingsToDefault() {
   Object.assign(viewSettings, DEFAULT_VIEW_SETTINGS);
   persistViewSettings();
   updateViewControlsUi();
-  applyViewSettings(true);
+  safeApplyViewSettings(true);
 }
 
 function getSeatHeadWorld(seatIndex, out = new THREE.Vector3()) {
@@ -2430,7 +2466,7 @@ function setupViewControls() {
       sanitizeViewSettings();
       updateViewControlsUi();
       persistViewSettings();
-      applyViewSettings(true);
+      safeApplyViewSettings(true);
     });
   };
 
@@ -3072,22 +3108,57 @@ function connect() {
   }
 }
 
-function initHdrEnvironment() {
+async function loadHdrTexture(url) {
+  try {
+    const head = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    if (!head.ok) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  try {
+    return await new RGBELoader().loadAsync(url);
+  } catch (error) {
+    console.warn('[env] HDR load failed, falling back', url, error);
+    return null;
+  }
+}
+
+async function initHdrEnvironment() {
   const fallbackEnv = () => {
     const envTex = pmremGenerator.fromScene(new RoomEnvironment(), 0.05).texture;
     scene.environment = envTex;
+    scene.background = null;
   };
 
-  new RGBELoader().load(
-    '/assets/hdr/warm_interior_01.hdr',
-    (texture) => {
-      const envMap = pmremGenerator.fromEquirectangular(texture).texture;
-      scene.environment = envMap;
-      texture.dispose();
-    },
-    undefined,
-    fallbackEnv
-  );
+  const hdrCandidates = [
+    '/assets/environments/default_lounge/warm_interior_01.hdr',
+    '/assets/hdr/warm_interior_01.hdr'
+  ];
+
+  for (const candidate of hdrCandidates) {
+    const texture = await loadHdrTexture(candidate);
+    if (!texture) continue;
+    const envMap = pmremGenerator.fromEquirectangular(texture).texture;
+    scene.environment = envMap;
+    scene.background = null;
+    texture.dispose();
+    return;
+  }
+
+  console.warn('[env] No HDR found; using RoomEnvironment fallback.');
+  fallbackEnv();
+}
+
+function runBootStep(label, fn) {
+  try {
+    return fn();
+  } catch (error) {
+    console.error(`[boot] ${label} failed`, error);
+    return null;
+  }
 }
 
 function ensureButtons() {
@@ -3343,7 +3414,7 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  applyViewSettings(false);
+  safeApplyViewSettings(false);
   controls.update();
   updatePenaltyEmojiPositions();
 }
@@ -3454,21 +3525,25 @@ async function loadEnvironmentManifest() {
 
 window.addEventListener('resize', onResize);
 
-loadStoredViewSettings();
-updateViewControlsUi();
-initHdrEnvironment();
-setupViewControls();
-ensureButtons();
-addPointerInteraction();
-showSections();
-setPanelOpen(true);
-updateScoreboard();
-updateTimerControls();
-updateTimerHud();
-updateEnvironmentControls();
-updateSocketUi();
-resetViewForLocalSeat(true);
-connect();
+runBootStep('ensureButtons', ensureButtons);
+runBootStep('connect', connect);
+
+runBootStep('loadStoredViewSettings', loadStoredViewSettings);
+runBootStep('updateViewControlsUi', updateViewControlsUi);
+runBootStep('setupViewControls', setupViewControls);
+runBootStep('addPointerInteraction', addPointerInteraction);
+runBootStep('showSections', showSections);
+runBootStep('setPanelOpen', () => setPanelOpen(true));
+runBootStep('updateScoreboard', updateScoreboard);
+runBootStep('updateTimerControls', updateTimerControls);
+runBootStep('updateTimerHud', updateTimerHud);
+runBootStep('updateEnvironmentControls', updateEnvironmentControls);
+runBootStep('updateSocketUi', updateSocketUi);
+runBootStep('resetViewForLocalSeat', () => resetViewForLocalSeat(true));
+
+void initHdrEnvironment().catch((error) => {
+  console.error('[env] initHdrEnvironment failed', error);
+});
 
 Promise.all([loadAvatarManifest(), loadEnvironmentManifest(), loadEnvironmentModels()])
   .then(() => {
@@ -3476,8 +3551,8 @@ Promise.all([loadAvatarManifest(), loadEnvironmentManifest(), loadEnvironmentMod
     renderAvatars();
   })
   .catch(() => {
-    // Keep running with runtime fallbacks.
+    console.warn('[boot] manifest/model warmup failed; runtime fallbacks active');
   });
 
-updateNameplates();
-animate();
+runBootStep('updateNameplates', updateNameplates);
+runBootStep('animate', animate);
