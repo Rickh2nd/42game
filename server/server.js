@@ -1,5 +1,6 @@
 import express from 'express';
 import http from 'node:http';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
@@ -31,14 +32,24 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
+const AVATAR_MANIFEST_PATH = path.join(ROOT_DIR, 'client', 'assets', 'avatars', 'manifest.json');
 
 const app = express();
+app.use('/assets', express.static(path.join(ROOT_DIR, 'client', 'assets'), { fallthrough: false }));
 app.use(express.static(path.join(ROOT_DIR, 'client')));
 app.use('/shared', express.static(path.join(ROOT_DIR, 'shared')));
 app.use('/node_modules', express.static(path.join(ROOT_DIR, 'node_modules')));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, now: Date.now() });
+});
+
+app.use((err, req, res, next) => {
+  if (req.path.startsWith('/assets/') && (err?.status === 404 || err?.code === 'ENOENT')) {
+    res.status(404).type('text/plain').send('Not found');
+    return;
+  }
+  next(err);
 });
 
 app.get('*', (_req, res) => {
@@ -53,6 +64,19 @@ const clients = new Map();
 let clientCounter = 1;
 
 const PORT = Number(process.env.PORT || 8080);
+const avatarManifestIds = loadAvatarManifestIds();
+const defaultAvatarId = avatarManifestIds.values().next().value || null;
+
+function loadAvatarManifestIds() {
+  try {
+    const raw = fs.readFileSync(AVATAR_MANIFEST_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.map((entry) => entry?.id).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
 
 function makeClientId() {
   const id = `c${clientCounter}`;
@@ -77,18 +101,23 @@ function makeSeat(seatIndex) {
     occupantClientId: null,
     type: 'human',
     cpuLevel: 1,
-    avatarId: null,
+    avatarId: defaultAvatarId,
     name: `Seat ${seatIndex + 1}`
   };
 }
 
 function createRoom(roomId, hostClientId) {
+  const seats = [0, 1, 2, 3].map(makeSeat);
+  seats[0].type = 'human';
+  seats[0].occupantClientId = hostClientId;
+  seats[0].name = 'Host';
+
   return {
     roomId,
     hostClientId,
     clientIds: new Set([hostClientId]),
     config: { ...CONFIG_DEFAULTS },
-    seats: [0, 1, 2, 3].map(makeSeat),
+    seats,
     phase: PHASES.LOBBY,
     dealerSeat: 0,
     turnSeat: 0,
@@ -138,6 +167,10 @@ function sendError(clientId, action, message) {
 
 function controlledSeatForClient(room, clientId) {
   return room.seats.filter((seat) => seat.occupantClientId === clientId).map((seat) => seat.seatIndex);
+}
+
+function humanSeatForClient(room, clientId) {
+  return room.seats.find((seat) => seat.type === 'human' && seat.occupantClientId === clientId) || null;
 }
 
 function roomPublicSnapshot(room, viewerClientId) {
@@ -209,6 +242,14 @@ function broadcastRoom(room) {
   }
 }
 
+function broadcastRoomEvent(room, payload) {
+  for (const clientId of room.clientIds) {
+    const client = clients.get(clientId);
+    if (!client) continue;
+    send(client.ws, payload);
+  }
+}
+
 function clearRoomTimers(room) {
   if (room.pendingCpuTimer) {
     clearTimeout(room.pendingCpuTimer);
@@ -258,6 +299,17 @@ function ensureHost(room, clientId, action) {
     return false;
   }
   return true;
+}
+
+function normalizeAvatarId(rawAvatarId) {
+  if (rawAvatarId == null || rawAvatarId === '') {
+    return defaultAvatarId;
+  }
+  const candidate = String(rawAvatarId).slice(0, 120);
+  if (avatarManifestIds.size > 0 && !avatarManifestIds.has(candidate)) {
+    return null;
+  }
+  return candidate;
 }
 
 function handIsFinished(room) {
@@ -645,6 +697,9 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
     seat.type = 'human';
     seat.occupantClientId = clientId;
     seat.name = (payload.name || `Player ${seat.seatIndex + 1}`).toString().slice(0, 24);
+    if (!seat.avatarId) {
+      seat.avatarId = defaultAvatarId;
+    }
     broadcastRoom(room);
     return true;
   }
@@ -684,13 +739,22 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
       seat.occupantClientId = null;
       seat.cpuLevel = Math.max(0, Math.min(4, Number(payload.cpuLevel) || seat.cpuLevel || 1));
       seat.name = (payload.name || seat.name || `CPU ${seat.seatIndex + 1}`).toString().slice(0, 24);
+      if (!seat.avatarId) {
+        seat.avatarId = defaultAvatarId;
+      }
       if (!seat.name || seat.name.startsWith('Seat ')) {
         seat.name = `CPU ${seat.seatIndex + 1}`;
       }
     } else {
       seat.cpuLevel = Math.max(0, Math.min(4, Number(payload.cpuLevel) || seat.cpuLevel || 1));
-      if (!seat.occupantClientId) {
+      if (payload.claimForSelf && !seat.occupantClientId) {
+        seat.occupantClientId = clientId;
+        seat.name = (payload.name || `Player ${seat.seatIndex + 1}`).toString().slice(0, 24);
+      } else if (!seat.occupantClientId) {
         seat.name = `Seat ${seat.seatIndex + 1}`;
+      }
+      if (!seat.avatarId) {
+        seat.avatarId = defaultAvatarId;
       }
     }
 
@@ -712,7 +776,42 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
       }
     }
 
-    seat.avatarId = typeof payload.avatarId === 'string' ? payload.avatarId.slice(0, 80) : null;
+    const avatarId = normalizeAvatarId(payload.avatarId);
+    if (avatarId === null) {
+      return reject('Invalid avatarId.');
+    }
+
+    seat.avatarId = avatarId;
+    if (seat.occupantClientId) {
+      broadcastRoomEvent(room, {
+        type: 'player:update',
+        playerId: seat.occupantClientId,
+        seatIndex: seat.seatIndex,
+        avatarId: seat.avatarId
+      });
+    }
+    broadcastRoom(room);
+    return true;
+  }
+
+  if (action === 'player:setAvatar') {
+    const humanSeat = humanSeatForClient(room, clientId);
+    if (!humanSeat) {
+      return reject('Claim a human seat before choosing an avatar.');
+    }
+
+    const avatarId = normalizeAvatarId(payload.avatarId);
+    if (avatarId === null) {
+      return reject('Invalid avatarId.');
+    }
+
+    humanSeat.avatarId = avatarId;
+    broadcastRoomEvent(room, {
+      type: 'player:update',
+      playerId: clientId,
+      seatIndex: humanSeat.seatIndex,
+      avatarId: humanSeat.avatarId
+    });
     broadcastRoom(room);
     return true;
   }

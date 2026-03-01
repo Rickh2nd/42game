@@ -37,6 +37,45 @@ body,
   inset: 0;
 }
 
+#scoreboard {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.scoreCard {
+  min-width: 230px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(8, 14, 21, 0.66);
+  backdrop-filter: blur(3px);
+  padding: 6px 8px;
+}
+
+.scoreLabel {
+  font-size: 10px;
+  color: var(--subtle);
+  letter-spacing: 0.12em;
+}
+
+.scoreSub {
+  font-size: 11px;
+  color: #d9e5f2;
+  margin-top: 2px;
+}
+
+.tallySvg {
+  width: 220px;
+  height: 42px;
+  display: block;
+  margin-top: 3px;
+}
+
 #gameCanvas {
   display: block;
   width: 100%;
@@ -208,6 +247,81 @@ body,
   color: var(--gold);
 }
 
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+}
+
+.modalBackdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 8, 14, 0.7);
+}
+
+.modalPanel {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  width: min(600px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(11, 16, 25, 0.97);
+  padding: 12px;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.modalHeader h2 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.04em;
+}
+
+.avatarGrid {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.avatarCard {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 7px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.avatarCard:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.avatarCard.active {
+  border-color: var(--gold-strong);
+  box-shadow: 0 0 0 1px rgba(242, 204, 119, 0.35);
+}
+
+.avatarName {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.avatarId {
+  font-size: 11px;
+  color: var(--subtle);
+  margin-top: 2px;
+}
+
 .controlRow {
   display: flex;
   flex-direction: column;
@@ -332,8 +446,23 @@ button:disabled {
 }
 
 @media (max-width: 920px) {
+  #scoreboard {
+    top: 8px;
+    gap: 5px;
+  }
+
+  .scoreCard {
+    min-width: 172px;
+    padding: 5px 6px;
+  }
+
+  .tallySvg {
+    width: 170px;
+  }
+
   #tableHud {
     width: min(86vw, 480px);
+    top: 56%;
   }
 
   .nameplate {

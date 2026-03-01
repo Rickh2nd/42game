@@ -5,11 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Texas 42 Dominoes</title>
     <link rel="stylesheet" href="/styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js",
+          "three/addons/": "/node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="app">
       <div id="sceneWrap">
         <canvas id="gameCanvas"></canvas>
+        <div id="scoreboard">
+          <div class="scoreCard" id="score-teamA">
+            <div class="scoreLabel">TEAM A MARKS</div>
+            <svg id="tally-teamA" class="tallySvg" viewBox="0 0 220 42" aria-label="Team A marks"></svg>
+            <div class="scoreSub" id="points-teamA">Points: 0</div>
+          </div>
+          <div class="scoreCard" id="score-teamB">
+            <div class="scoreLabel">TEAM B MARKS</div>
+            <svg id="tally-teamB" class="tallySvg" viewBox="0 0 220 42" aria-label="Team B marks"></svg>
+            <div class="scoreSub" id="points-teamB">Points: 0</div>
+          </div>
+        </div>
         <div id="tableHud">
           <div class="hudBlock hudLeft">
             <div class="hudLabel">BID</div>
@@ -34,7 +54,10 @@
       <aside id="sidePanel" class="closed">
         <header class="panelHeader">
           <div class="panelTitle">Texas 42</div>
-          <button id="closePanelBtn" class="panelClose" title="Close">×</button>
+          <div class="buttonRow">
+            <button id="changeAvatarBtn" title="Change avatar">Change Avatar</button>
+            <button id="closePanelBtn" class="panelClose" title="Close">×</button>
+          </div>
         </header>
 
         <section id="section-room" class="panelSection">
@@ -90,6 +113,18 @@
 
         <div id="eventLog" aria-live="polite"></div>
       </aside>
+    </div>
+
+    <div id="avatarModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Avatar picker">
+      <div class="modalBackdrop" id="avatarModalBackdrop"></div>
+      <div class="modalPanel">
+        <div class="modalHeader">
+          <h2>Choose Avatar</h2>
+          <button id="closeAvatarModalBtn" class="panelClose">×</button>
+        </div>
+        <div id="avatarPickerStatus" class="smallText"></div>
+        <div id="avatarGrid" class="avatarGrid"></div>
+      </div>
     </div>
 
     <script type="module" src="/main.js"></script>

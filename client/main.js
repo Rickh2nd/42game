@@ -1,7 +1,11 @@
-import * as THREE from '/node_modules/three/build/three.module.js';
-import { GLTFLoader } from '/node_modules/three/examples/jsm/loaders/GLTFLoader.js';
-import { RGBELoader } from '/node_modules/three/examples/jsm/loaders/RGBELoader.js';
-import { RoomEnvironment } from '/node_modules/three/examples/jsm/environments/RoomEnvironment.js';
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
+import { SEATS, toRelativeSeat } from '/seats.js';
 
 const MODES = {
   TRUMPS: 'trumps',
@@ -23,10 +27,14 @@ const PLAY_PLANE_Y = 0.6;
 const DOMINO_THICKNESS = 0.14;
 const DOMINO_Y = PLAY_PLANE_Y + DOMINO_THICKNESS / 2;
 
+const DEFAULT_AVATAR_ID = 'cowboy_male';
+const AVATAR_STORAGE_KEY = 'avatarId';
+
 const canvas = document.getElementById('gameCanvas');
 const panel = document.getElementById('sidePanel');
 const panelToggle = document.getElementById('panelToggle');
 const closePanelBtn = document.getElementById('closePanelBtn');
+const changeAvatarBtn = document.getElementById('changeAvatarBtn');
 const roomIdInput = document.getElementById('roomIdInput');
 const roomStatus = document.getElementById('roomStatus');
 const eventLog = document.getElementById('eventLog');
@@ -45,6 +53,17 @@ const sectionMarks = document.getElementById('section-marks');
 const bidButtonsWrap = document.getElementById('bidButtons');
 const trumpButtonsWrap = document.getElementById('trumpButtons');
 const modeButtonsWrap = document.getElementById('modeButtons');
+
+const avatarModal = document.getElementById('avatarModal');
+const avatarModalBackdrop = document.getElementById('avatarModalBackdrop');
+const closeAvatarModalBtn = document.getElementById('closeAvatarModalBtn');
+const avatarGrid = document.getElementById('avatarGrid');
+const avatarPickerStatus = document.getElementById('avatarPickerStatus');
+
+const tallyTeamA = document.getElementById('tally-teamA');
+const tallyTeamB = document.getElementById('tally-teamB');
+const pointsTeamA = document.getElementById('points-teamA');
+const pointsTeamB = document.getElementById('points-teamB');
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -71,6 +90,10 @@ const visualsGroup = new THREE.Group();
 visualsGroup.name = 'visualsGroup';
 scene.add(visualsGroup);
 
+const environmentGroup = new THREE.Group();
+environmentGroup.name = 'environmentGroup';
+visualsGroup.add(environmentGroup);
+
 const handGroup = new THREE.Group();
 handGroup.name = 'handGroup';
 scene.add(handGroup);
@@ -88,7 +111,13 @@ const burnGroupB = new THREE.Group();
 oppHandGroup.add(burnGroupA);
 oppHandGroup.add(burnGroupB);
 
-const seatAvatarGroup = [0, 1, 2, 3].map(() => {
+const chairSeatGroups = [0, 1, 2, 3].map(() => {
+  const g = new THREE.Group();
+  environmentGroup.add(g);
+  return g;
+});
+
+const avatarSeatGroups = [0, 1, 2, 3].map(() => {
   const g = new THREE.Group();
   visualsGroup.add(g);
   return g;
@@ -97,55 +126,32 @@ const seatAvatarGroup = [0, 1, 2, 3].map(() => {
 const pmremGenerator = new THREE.PMREMGenerator(renderer);
 pmremGenerator.compileEquirectangularShader();
 
-const ambient = new THREE.HemisphereLight(0xfff4dd, 0x334e63, 0.52);
+const ambient = new THREE.HemisphereLight(0xf5e9cf, 0x2f516b, 0.52);
 scene.add(ambient);
 
-const keyLight = new THREE.DirectionalLight(0xfff2db, 1.18);
-keyLight.position.set(4.8, 8.8, 3.2);
+const keyLight = new THREE.DirectionalLight(0xfff2db, 1.17);
+keyLight.position.set(4.8, 8.9, 4.5);
 keyLight.castShadow = true;
 keyLight.shadow.mapSize.set(2048, 2048);
 keyLight.shadow.camera.near = 1;
-keyLight.shadow.camera.far = 25;
-keyLight.shadow.bias = -0.0002;
+keyLight.shadow.camera.far = 28;
+keyLight.shadow.bias = -0.0003;
 scene.add(keyLight);
 
-const fillLight = new THREE.DirectionalLight(0xa9c7ff, 0.28);
-fillLight.position.set(-5, 5, -2);
+const fillLight = new THREE.DirectionalLight(0x8ab4ff, 0.34);
+fillLight.position.set(-5.6, 6.2, -3.6);
 scene.add(fillLight);
 
-const tableMat = new THREE.MeshStandardMaterial({
-  color: 0x6b3a16,
-  roughness: 0.58,
-  metalness: 0.09
-});
-const table = new THREE.Mesh(new THREE.CylinderGeometry(5.9, 5.9, 0.45, 64), tableMat);
-table.receiveShadow = true;
-table.castShadow = true;
-table.position.set(0, PLAY_PLANE_Y - 0.28, 0);
-visualsGroup.add(table);
-
-const tableRim = new THREE.Mesh(
-  new THREE.TorusGeometry(5.8, 0.08, 20, 120),
-  new THREE.MeshStandardMaterial({ color: 0x1b0f08, roughness: 0.5, metalness: 0.2 })
-);
-tableRim.rotation.x = Math.PI / 2;
-tableRim.position.y = PLAY_PLANE_Y - 0.06;
-visualsGroup.add(tableRim);
-
-const felt = new THREE.Mesh(
-  new THREE.CylinderGeometry(5.45, 5.45, 0.04, 64),
-  new THREE.MeshStandardMaterial({ color: 0x0f5c45, roughness: 0.93, metalness: 0.03 })
-);
-felt.position.y = PLAY_PLANE_Y - 0.02;
-felt.receiveShadow = true;
-visualsGroup.add(felt);
+const rimLight = new THREE.DirectionalLight(0xffd3a6, 0.22);
+rimLight.position.set(0, 5, -7.4);
+scene.add(rimLight);
 
 const debugPlane = new THREE.Mesh(
   new THREE.PlaneGeometry(12, 12),
   new THREE.MeshBasicMaterial({
     color: 0x60bdf5,
     transparent: true,
-    opacity: 0.16,
+    opacity: 0.15,
     side: THREE.DoubleSide,
     depthWrite: false
   })
@@ -163,23 +169,36 @@ scene.add(axesHelper);
 const dominoGeometry = new THREE.BoxGeometry(1.16, DOMINO_THICKNESS, 0.58);
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
+const clock = new THREE.Clock();
 
 const gltfLoader = new GLTFLoader();
+const objLoader = new OBJLoader();
+const mtlLoader = new MTLLoader();
+
 const textureCache = new Map();
+const modelCache = new Map();
+const activeAvatarLoadToken = new Map();
+const seatMixers = new Map();
+const environmentTemplates = {
+  table: null,
+  chair: null
+};
+
 const avatarCatalog = [];
 const avatarById = new Map();
-const activeAvatarLoadToken = new Map();
 
 let ws = null;
 let localClientId = null;
 let roomState = null;
-let infoMessage = '';
 let panelOpen = true;
 let forceClosePanel = false;
 let lastPhase = null;
+let lastLocalSeat = null;
 let debugVisible = false;
+let storedAvatarAppliedSeat = null;
+let roomChangingAvatarOptimistic = false;
 
-function logMessage(text, timeoutMs = 2400) {
+function logMessage(text, timeoutMs = 2600) {
   eventLog.textContent = text;
   if (timeoutMs > 0) {
     const stamp = Date.now();
@@ -217,19 +236,6 @@ function getLocalSeat() {
   if (!roomState || !localClientId) return null;
   const seat = roomState.seats.find((s) => s.occupantClientId === localClientId && s.type === 'human');
   return seat ? seat.seatIndex : null;
-}
-
-function getLocalControlledSeats() {
-  if (!roomState || !localClientId) return [];
-  return roomState.seats.filter((s) => s.occupantClientId === localClientId).map((s) => s.seatIndex);
-}
-
-function getCurrentHighBid() {
-  if (!roomState?.bidHistory) return 0;
-  return roomState.bidHistory.reduce((max, entry) => {
-    if (Number.isInteger(entry.bid) && entry.bid > max) return entry.bid;
-    return max;
-  }, 0);
 }
 
 function localCanControlSeat(seatIndex) {
@@ -339,6 +345,67 @@ function showSections() {
   sectionMarks.classList.toggle('hidden', !show.marks);
 }
 
+function renderTallies(svg, value) {
+  const count = Math.max(0, Number(value) || 0);
+  svg.replaceChildren();
+
+  const ns = 'http://www.w3.org/2000/svg';
+  const stroke = '#f8e3b0';
+  const slash = '#f7c77a';
+
+  let x = 6;
+  const yTop = 8;
+  const yBottom = 34;
+
+  const addLine = (x1, y1, x2, y2, color = stroke, width = 2.8) => {
+    const line = document.createElementNS(ns, 'line');
+    line.setAttribute('x1', `${x1}`);
+    line.setAttribute('y1', `${y1}`);
+    line.setAttribute('x2', `${x2}`);
+    line.setAttribute('y2', `${y2}`);
+    line.setAttribute('stroke', color);
+    line.setAttribute('stroke-width', `${width}`);
+    line.setAttribute('stroke-linecap', 'round');
+    svg.append(line);
+  };
+
+  const fives = Math.floor(count / 5);
+  const remainder = count % 5;
+
+  for (let g = 0; g < fives; g += 1) {
+    addLine(x + 0, yTop, x + 0, yBottom);
+    addLine(x + 8, yTop, x + 8, yBottom);
+    addLine(x + 16, yTop, x + 16, yBottom);
+    addLine(x + 24, yTop, x + 24, yBottom);
+    addLine(x - 2, yBottom - 1, x + 26, yTop + 1, slash, 3.2);
+    x += 38;
+  }
+
+  for (let r = 0; r < remainder; r += 1) {
+    addLine(x + r * 8, yTop, x + r * 8, yBottom);
+  }
+
+  const width = Math.max(220, x + Math.max(0, remainder - 1) * 8 + 16);
+  svg.setAttribute('viewBox', `0 0 ${width} 42`);
+}
+
+function updateScoreboard() {
+  if (!roomState) {
+    renderTallies(tallyTeamA, 0);
+    renderTallies(tallyTeamB, 0);
+    pointsTeamA.textContent = 'Points: 0';
+    pointsTeamB.textContent = 'Points: 0';
+    return;
+  }
+
+  const marks = roomState.gameMarks || { teamA: 0, teamB: 0 };
+  const points = roomState.pointsThisHand || { teamA: 0, teamB: 0 };
+  renderTallies(tallyTeamA, marks.teamA);
+  renderTallies(tallyTeamB, marks.teamB);
+  pointsTeamA.textContent = `Points: ${points.teamA}`;
+  pointsTeamB.textContent = `Points: ${points.teamB}`;
+}
+
 function drawPips(ctx, value, xCenter) {
   const layout = {
     0: [],
@@ -365,6 +432,7 @@ function getDominoTexture(tile, options = {}) {
     glowCount = false,
     magentaTrump = false
   } = options;
+
   const id = tile ? tile.id || tileId(tile) : 'back';
   const key = `${id}:${faceUp ? 'up' : 'down'}:${pipColor}:${glowCount ? 1 : 0}:${magentaTrump ? 1 : 0}`;
   if (textureCache.has(key)) return textureCache.get(key);
@@ -444,8 +512,8 @@ function createDominoMesh(tile, options = {}) {
   const sideMat = new THREE.MeshStandardMaterial({ color: faceUp ? 0xf2ece1 : 0x2f3f4d, roughness: 0.9, metalness: 0.06 });
   const topMat = new THREE.MeshStandardMaterial({ map: topTexture, roughness: 0.78, metalness: 0.03 });
   const bottomMat = new THREE.MeshStandardMaterial({ map: bottomTexture, roughness: 0.9, metalness: 0.03 });
-
   const mats = [sideMat, sideMat, topMat, bottomMat, sideMat, sideMat];
+
   const mesh = new THREE.Mesh(dominoGeometry, mats);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -468,25 +536,285 @@ function clearGroup(group) {
       clearGroup(child);
     }
     group.remove(child);
-    if (child.geometry && child.geometry !== dominoGeometry) child.geometry.dispose();
+    if (child.geometry && child.geometry !== dominoGeometry) {
+      child.geometry.dispose();
+    }
     if (Array.isArray(child.material)) {
-      child.material.forEach((mat) => mat.dispose && mat.dispose());
+      child.material.forEach((mat) => mat?.dispose && mat.dispose());
     } else if (child.material) {
       child.material.dispose && child.material.dispose();
     }
   }
 }
 
-function layoutSeatAnchor(relativeSeat) {
-  if (relativeSeat === 0) return { x: 0, z: 3.75, rotY: 0 };
-  if (relativeSeat === 1) return { x: 3.85, z: 0, rotY: -Math.PI / 2 };
-  if (relativeSeat === 2) return { x: 0, z: -3.75, rotY: Math.PI };
-  return { x: -3.85, z: 0, rotY: Math.PI / 2 };
+function normalizeAvatarModel(model, seatedY = 0.37, targetHeight = 1.65) {
+  const box = new THREE.Box3().setFromObject(model);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  if (size.y <= 0.0001) return;
+
+  const scale = targetHeight / size.y;
+  model.scale.multiplyScalar(scale);
+
+  box.setFromObject(model);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  model.position.x -= center.x;
+  model.position.z -= center.z;
+
+  box.setFromObject(model);
+  model.position.y -= box.min.y;
+
+  // Fallback static seated stance when a sit animation clip does not exist.
+  model.rotation.x = -0.17;
+  model.position.y = seatedY - 0.24;
+  model.scale.y *= 0.82;
 }
 
-function toRelativeSeat(seatIndex, localSeat) {
-  if (localSeat == null) return seatIndex;
-  return (seatIndex - localSeat + 4) % 4;
+function tuneImportedMaterials(root) {
+  root.traverse((obj) => {
+    if (!obj.isMesh) return;
+    obj.castShadow = true;
+    obj.receiveShadow = true;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach((mat) => {
+      if (!mat) return;
+      if (mat.map) {
+        mat.map.colorSpace = THREE.SRGBColorSpace;
+        mat.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      }
+      if (mat.emissiveMap) {
+        mat.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+      }
+      if (mat.roughness == null) mat.roughness = 0.82;
+      if (mat.metalness == null) mat.metalness = 0.08;
+      mat.needsUpdate = true;
+    });
+  });
+}
+
+function loaderPromise(loader, url) {
+  return new Promise((resolve, reject) => {
+    loader.load(url, resolve, undefined, reject);
+  });
+}
+
+async function loadModelTemplate(url) {
+  if (!modelCache.has(url)) {
+    const task = (async () => {
+      const lower = url.toLowerCase();
+      if (lower.endsWith('.glb') || lower.endsWith('.gltf')) {
+        const gltf = await loaderPromise(gltfLoader, url);
+        const sceneRoot = gltf.scene || gltf.scenes?.[0];
+        if (!sceneRoot) {
+          throw new Error(`Model has no scene: ${url}`);
+        }
+        return {
+          scene: sceneRoot,
+          animations: gltf.animations || []
+        };
+      }
+
+      if (lower.endsWith('.obj')) {
+        const mtlUrl = url.replace(/\.obj$/i, '.mtl');
+        try {
+          const mats = await loaderPromise(mtlLoader, mtlUrl);
+          mats.preload();
+          objLoader.setMaterials(mats);
+        } catch {
+          // Optional MTL fallback.
+        }
+        const obj = await loaderPromise(objLoader, url);
+        return {
+          scene: obj,
+          animations: []
+        };
+      }
+
+      throw new Error(`Unsupported model extension: ${url}`);
+    })();
+
+    modelCache.set(url, task);
+  }
+
+  return modelCache.get(url);
+}
+
+function clonedModelAsset(asset) {
+  let cloned;
+  try {
+    cloned = skeletonClone(asset.scene);
+  } catch {
+    cloned = asset.scene.clone(true);
+  }
+  return {
+    scene: cloned,
+    animations: asset.animations || []
+  };
+}
+
+function buildFallbackAvatar() {
+  const avatar = new THREE.Group();
+  const torso = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.19, 0.5, 4, 8),
+    new THREE.MeshStandardMaterial({ color: 0x9fb0c7, roughness: 0.65, metalness: 0.08 })
+  );
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 20, 20),
+    new THREE.MeshStandardMaterial({ color: 0xe7d8c0, roughness: 0.64, metalness: 0.02 })
+  );
+  torso.position.y = 0.3;
+  head.position.y = 0.77;
+  torso.castShadow = true;
+  torso.receiveShadow = true;
+  head.castShadow = true;
+  head.receiveShadow = true;
+  avatar.add(torso, head);
+  avatar.rotation.x = -0.17;
+  avatar.position.y = 0.12;
+  return avatar;
+}
+
+function clearSeatMixer(seatIndex) {
+  const existing = seatMixers.get(seatIndex);
+  if (!existing) return;
+  seatMixers.delete(seatIndex);
+}
+
+async function setSeatAvatarModel(seatIndex, avatarId) {
+  const targetGroup = avatarSeatGroups[seatIndex];
+  clearSeatMixer(seatIndex);
+  clearGroup(targetGroup);
+
+  const token = `${seatIndex}:${avatarId || 'default'}:${Date.now()}`;
+  activeAvatarLoadToken.set(seatIndex, token);
+
+  const entry = avatarById.get(avatarId) || avatarById.get(DEFAULT_AVATAR_ID) || avatarCatalog[0] || null;
+
+  const applyFallback = () => {
+    if (activeAvatarLoadToken.get(seatIndex) !== token) return;
+    targetGroup.add(buildFallbackAvatar());
+  };
+
+  if (!entry?.file) {
+    applyFallback();
+    return;
+  }
+
+  try {
+    const asset = await loadModelTemplate(entry.file);
+    if (activeAvatarLoadToken.get(seatIndex) !== token) return;
+
+    const cloned = clonedModelAsset(asset);
+    tuneImportedMaterials(cloned.scene);
+    normalizeAvatarModel(cloned.scene, 0.37, 1.65);
+    targetGroup.add(cloned.scene);
+
+    const sitClip = cloned.animations.find((clip) => /sit/i.test(clip.name));
+    if (sitClip) {
+      const mixer = new THREE.AnimationMixer(cloned.scene);
+      mixer.clipAction(sitClip).play();
+      seatMixers.set(seatIndex, mixer);
+      cloned.scene.rotation.x = 0;
+      cloned.scene.position.y = 0;
+    }
+  } catch {
+    applyFallback();
+  }
+}
+
+function setChairModelForSeat(seatIndex, chairTemplate) {
+  const group = chairSeatGroups[seatIndex];
+  clearGroup(group);
+  if (!chairTemplate) {
+    const fallback = new THREE.Mesh(
+      new THREE.BoxGeometry(0.62, 0.08, 0.62),
+      new THREE.MeshStandardMaterial({ color: 0x363f4d, roughness: 0.72, metalness: 0.1 })
+    );
+    fallback.position.y = 0.42;
+    fallback.castShadow = true;
+    fallback.receiveShadow = true;
+    group.add(fallback);
+    return;
+  }
+  const clone = clonedModelAsset(chairTemplate).scene;
+  tuneImportedMaterials(clone);
+  group.add(clone);
+}
+
+async function loadEnvironmentModels() {
+  try {
+    environmentTemplates.table = await loadModelTemplate('/assets/models/table.glb');
+  } catch {
+    environmentTemplates.table = null;
+  }
+
+  try {
+    environmentTemplates.chair = await loadModelTemplate('/assets/models/chair.glb');
+  } catch {
+    environmentTemplates.chair = null;
+  }
+
+  const tableNode = new THREE.Group();
+  tableNode.name = 'tableModel';
+  if (environmentTemplates.table) {
+    const tableClone = clonedModelAsset(environmentTemplates.table).scene;
+    tuneImportedMaterials(tableClone);
+    tableNode.add(tableClone);
+  } else {
+    const fallback = new THREE.Mesh(
+      new THREE.CylinderGeometry(5.8, 5.8, 0.48, 64),
+      new THREE.MeshStandardMaterial({ color: 0x5f3618, roughness: 0.6, metalness: 0.08 })
+    );
+    fallback.position.y = PLAY_PLANE_Y - 0.24;
+    fallback.receiveShadow = true;
+    fallback.castShadow = true;
+    tableNode.add(fallback);
+  }
+
+  const prevTable = environmentGroup.getObjectByName('tableModel');
+  if (prevTable) {
+    environmentGroup.remove(prevTable);
+    clearGroup(prevTable);
+  }
+  environmentGroup.add(tableNode);
+
+  for (let seat = 0; seat < 4; seat += 1) {
+    setChairModelForSeat(seat, environmentTemplates.chair);
+  }
+
+  updateSeatTransforms();
+}
+
+function updateSeatTransforms() {
+  const localSeat = getLocalSeat();
+  for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
+    const rel = toRelativeSeat(seatIndex, localSeat);
+    const seatConfig = SEATS[rel];
+
+    const chairGroup = chairSeatGroups[seatIndex];
+    chairGroup.position.set(...seatConfig.chair.pos);
+    chairGroup.rotation.y = seatConfig.chair.rotY;
+
+    const avatarGroup = avatarSeatGroups[seatIndex];
+    avatarGroup.position.set(...seatConfig.avatar.pos);
+    avatarGroup.rotation.y = seatConfig.avatar.rotY;
+  }
+}
+
+function renderAvatars() {
+  if (!roomState) {
+    for (let i = 0; i < 4; i += 1) {
+      clearSeatMixer(i);
+      clearGroup(avatarSeatGroups[i]);
+    }
+    return;
+  }
+
+  updateSeatTransforms();
+  for (const seat of roomState.seats) {
+    void setSeatAvatarModel(seat.seatIndex, seat.avatarId);
+  }
 }
 
 function renderHandsAndTrick() {
@@ -503,15 +831,17 @@ function renderHandsAndTrick() {
   const myHand = localSeat != null ? roomState.hands?.[localSeat] || [] : [];
 
   if (myHand.length) {
+    const seatAnchor = SEATS[0].handAnchor;
     const spacing = 1.22;
-    const startX = -((myHand.length - 1) * spacing) / 2;
+    const startOffset = -((myHand.length - 1) * spacing) / 2;
+
     myHand.forEach((tile, index) => {
       const mesh = createDominoMesh(tile, {
         faceUp: true,
         glowCount: countTilePoints(tile) > 0
       });
-      mesh.position.set(startX + index * spacing, DOMINO_Y, 3.82);
-      mesh.rotation.x = 0;
+      mesh.position.set(seatAnchor.pos[0] + startOffset + index * spacing, DOMINO_Y, seatAnchor.pos[2]);
+      mesh.rotation.y = seatAnchor.rotY;
       mesh.userData.tileId = tile.id;
       mesh.userData.seatIndex = localSeat;
       mesh.userData.clickable = true;
@@ -523,12 +853,12 @@ function renderHandsAndTrick() {
     if (seatIndex === localSeat) continue;
     const count = roomState.handCounts?.[seatIndex] || 0;
     const rel = toRelativeSeat(seatIndex, localSeat);
-    const anchor = layoutSeatAnchor(rel);
+    const seatAnchor = SEATS[rel].handAnchor;
 
     for (let i = 0; i < count; i += 1) {
       const mesh = createDominoMesh({ a: 0, b: 0, id: 'back' }, { faceUp: false });
-      mesh.position.set(anchor.x, DOMINO_Y + i * 0.012, anchor.z + i * 0.06);
-      mesh.rotation.y = anchor.rotY;
+      mesh.position.set(seatAnchor.pos[0], DOMINO_Y + i * 0.012, seatAnchor.pos[2] + i * 0.06);
+      mesh.rotation.y = seatAnchor.rotY;
       mesh.scale.setScalar(0.92);
       oppHandGroup.add(mesh);
     }
@@ -562,7 +892,6 @@ function renderHandsAndTrick() {
 function renderBurnPiles() {
   clearGroup(burnGroupA);
   clearGroup(burnGroupB);
-
   if (!roomState) return;
 
   const aTiles = roomState.burnPiles?.teamA || [];
@@ -584,93 +913,8 @@ function renderBurnPiles() {
     });
   };
 
-  renderPile(aTiles, burnGroupA, -2.8, 2.6, 0.2);
+  renderPile(aTiles, burnGroupA, -2.8, 2.6, 0.18);
   renderPile(bTiles, burnGroupB, 2.2, -3.0, -0.2);
-}
-
-function setSeatAvatarModel(seatIndex, avatarId) {
-  const targetGroup = seatAvatarGroup[seatIndex];
-  targetGroup.clear();
-
-  const rel = toRelativeSeat(seatIndex, getLocalSeat());
-  const anchor = layoutSeatAnchor(rel);
-  targetGroup.position.set(anchor.x, PLAY_PLANE_Y + 0.05, anchor.z);
-  targetGroup.rotation.y = anchor.rotY + Math.PI;
-
-  const token = `${seatIndex}:${avatarId || 'none'}:${Date.now()}`;
-  activeAvatarLoadToken.set(seatIndex, token);
-
-  const fallback = () => {
-    const body = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.2, 0.55, 4, 8),
-      new THREE.MeshStandardMaterial({ color: 0x8d9cb6, roughness: 0.62, metalness: 0.15 })
-    );
-    body.castShadow = true;
-    body.receiveShadow = true;
-    body.position.y = 0.45;
-    targetGroup.add(body);
-  };
-
-  const entry = avatarById.get(avatarId);
-  if (!entry) {
-    fallback();
-    return;
-  }
-
-  gltfLoader.load(
-    entry.url,
-    (gltf) => {
-      if (activeAvatarLoadToken.get(seatIndex) !== token) return;
-      const model = gltf.scene || gltf.scenes?.[0];
-      if (!model) {
-        fallback();
-        return;
-      }
-
-      model.traverse((obj) => {
-        if (obj.isMesh) {
-          obj.castShadow = true;
-          obj.receiveShadow = true;
-          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-          mats.forEach((mat) => {
-            if (!mat) return;
-            if (mat.map) {
-              mat.map.colorSpace = THREE.SRGBColorSpace;
-              mat.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
-            }
-            if (mat.emissiveMap) {
-              mat.emissiveMap.colorSpace = THREE.SRGBColorSpace;
-            }
-          });
-        }
-      });
-
-      const box = new THREE.Box3().setFromObject(model);
-      const size = new THREE.Vector3();
-      box.getSize(size);
-      const maxAxis = Math.max(size.x, size.y, size.z) || 1;
-      const scale = 0.95 / maxAxis;
-      model.scale.setScalar(scale);
-      box.setFromObject(model);
-      const center = new THREE.Vector3();
-      box.getCenter(center);
-      model.position.sub(center);
-      model.position.y += 0.55;
-
-      targetGroup.add(model);
-    },
-    undefined,
-    () => {
-      fallback();
-    }
-  );
-}
-
-function renderAvatars() {
-  if (!roomState) return;
-  roomState.seats.forEach((seat) => {
-    setSeatAvatarModel(seat.seatIndex, seat.avatarId);
-  });
 }
 
 function updateHud() {
@@ -678,6 +922,7 @@ function updateHud() {
     hudBidValue.textContent = '-';
     hudTrumpValue.textContent = '-';
     marksText.textContent = 'Not in a room.';
+    updateScoreboard();
     return;
   }
 
@@ -688,7 +933,8 @@ function updateHud() {
   const rounds = roomState.roundWins || { teamA: 0, teamB: 0 };
   const points = roomState.pointsThisHand || { teamA: 0, teamB: 0 };
   const target = roomState.targetThisHand || { teamA: 0, teamB: 0 };
-  marksText.textContent = `Points A/B: ${points.teamA}/${points.teamB} | Target A/B: ${target.teamA}/${target.teamB} | RoundWins A/B: ${rounds.teamA}/${rounds.teamB} | GameMarks A/B: ${marks.teamA}/${marks.teamB}`;
+  marksText.textContent = `Marks A/B: ${marks.teamA}/${marks.teamB} | Rounds A/B: ${rounds.teamA}/${rounds.teamB} | Points A/B: ${points.teamA}/${points.teamB} | Target A/B: ${target.teamA}/${target.teamB}`;
+  updateScoreboard();
 }
 
 function updateNameplates() {
@@ -706,8 +952,8 @@ function updateNameplates() {
       type: 'human',
       occupantClientId: null
     };
-    const active = roomState?.turnSeat === seatIndex;
 
+    const active = roomState?.turnSeat === seatIndex;
     const role = seat.type === 'cpu'
       ? `CPU L${seat.cpuLevel ?? 0}`
       : seat.occupantClientId
@@ -720,6 +966,55 @@ function updateNameplates() {
     node.classList.toggle('active', active);
     node.innerHTML = `<div class="seatName">${seat.name}${crown}</div><div class="seatMeta">${role}${bidText}</div>`;
   }
+}
+
+function buildAvatarPickerGrid() {
+  avatarGrid.innerHTML = '';
+  const selected = localStorage.getItem(AVATAR_STORAGE_KEY) || '';
+
+  avatarCatalog.forEach((entry) => {
+    const card = document.createElement('button');
+    card.className = `avatarCard${entry.id === selected ? ' active' : ''}`;
+    card.type = 'button';
+    card.innerHTML = `<div class="avatarName">${entry.name}</div><div class="avatarId">${entry.id}</div>`;
+    card.addEventListener('click', () => {
+      applyAvatarSelection(entry.id);
+    });
+    avatarGrid.appendChild(card);
+  });
+}
+
+function openAvatarModal() {
+  const localSeat = getLocalSeat();
+  if (localSeat == null) {
+    logMessage('Claim a human seat before changing avatar.');
+    return;
+  }
+
+  avatarPickerStatus.textContent = `Seat ${localSeat + 1}: choose a look`; 
+  buildAvatarPickerGrid();
+  avatarModal.classList.remove('hidden');
+}
+
+function closeAvatarModal() {
+  avatarModal.classList.add('hidden');
+}
+
+function applyAvatarSelection(avatarId) {
+  localStorage.setItem(AVATAR_STORAGE_KEY, avatarId);
+  const localSeat = getLocalSeat();
+  if (localSeat == null || !roomState?.seats?.[localSeat]) {
+    buildAvatarPickerGrid();
+    return;
+  }
+
+  roomState.seats[localSeat].avatarId = avatarId;
+  roomChangingAvatarOptimistic = true;
+  renderAvatars();
+  renderSeatControls();
+  buildAvatarPickerGrid();
+
+  sendAction('player:setAvatar', { avatarId });
 }
 
 function renderSeatControls() {
@@ -766,8 +1061,7 @@ function renderSeatControls() {
       <div class="controlRow">
         <label>Avatar</label>
         <select data-action="avatar" data-seat="${seat.seatIndex}" ${canAvatarEdit ? '' : 'disabled'}>
-          <option value="">Default</option>
-          ${avatarCatalog.map((entry) => `<option value="${entry.id}" ${entry.id === seat.avatarId ? 'selected' : ''}>${entry.label}</option>`).join('')}
+          ${avatarCatalog.map((entry) => `<option value="${entry.id}" ${entry.id === seat.avatarId ? 'selected' : ''}>${entry.name}</option>`).join('')}
         </select>
       </div>
       <div class="smallText">${seat.occupantClientId ? `Client ${seat.occupantClientId}` : (seat.type === 'cpu' ? 'CPU seat' : 'Unclaimed')}</div>
@@ -779,25 +1073,31 @@ function renderSeatControls() {
   seatControls.querySelectorAll('[data-action]').forEach((el) => {
     const action = el.dataset.action;
     const seatIndex = Number(el.dataset.seat);
+
     if (action === 'claim') {
       el.addEventListener('click', () => {
         sendAction('claimSeat', { seatIndex, name: `Player ${seatIndex + 1}` });
       });
     }
+
     if (action === 'release') {
       el.addEventListener('click', () => {
         sendAction('releaseSeat', { seatIndex });
       });
     }
+
     if (action === 'setType') {
       el.addEventListener('change', () => {
         sendAction('setSeatType', {
           seatIndex,
           type: el.value,
-          cpuLevel: roomState.seats[seatIndex].cpuLevel
+          cpuLevel: roomState.seats[seatIndex].cpuLevel,
+          claimForSelf: el.value === 'human',
+          name: `Player ${seatIndex + 1}`
         });
       });
     }
+
     if (action === 'setCpu') {
       el.addEventListener('change', () => {
         sendAction('setSeatType', {
@@ -807,11 +1107,12 @@ function renderSeatControls() {
         });
       });
     }
+
     if (action === 'avatar') {
       el.addEventListener('change', () => {
         sendAction('setSeatAvatar', {
           seatIndex,
-          avatarId: el.value || null
+          avatarId: el.value
         });
       });
     }
@@ -824,9 +1125,18 @@ function renderSeatControls() {
   }
 }
 
+function getCurrentHighBid() {
+  if (!roomState?.bidHistory) return 0;
+  return roomState.bidHistory.reduce((max, entry) => {
+    if (Number.isInteger(entry.bid) && entry.bid > max) return entry.bid;
+    return max;
+  }, 0);
+}
+
 function updateBidControls() {
   bidButtonsWrap.innerHTML = '';
   const passBtn = document.getElementById('passBidBtn');
+
   if (!roomState || roomState.phase !== PHASES.BIDDING) {
     passBtn.disabled = true;
     return;
@@ -887,8 +1197,41 @@ function updateTrumpControls() {
   }
 }
 
+function applyStoredAvatarIfNeeded() {
+  if (!roomState || !localClientId) return;
+  const localSeat = getLocalSeat();
+  if (localSeat == null) return;
+  if (storedAvatarAppliedSeat === localSeat) return;
+
+  const desired = localStorage.getItem(AVATAR_STORAGE_KEY);
+  if (!desired || !avatarById.has(desired)) {
+    storedAvatarAppliedSeat = localSeat;
+    return;
+  }
+
+  const current = roomState.seats[localSeat]?.avatarId;
+  if (current === desired) {
+    storedAvatarAppliedSeat = localSeat;
+    return;
+  }
+
+  roomState.seats[localSeat].avatarId = desired;
+  sendAction('player:setAvatar', { avatarId: desired });
+  storedAvatarAppliedSeat = localSeat;
+}
+
 function applySnapshot(room) {
+  const prevLocalSeat = lastLocalSeat;
   roomState = room;
+
+  const newLocalSeat = getLocalSeat();
+  lastLocalSeat = newLocalSeat;
+  if (prevLocalSeat !== newLocalSeat) {
+    storedAvatarAppliedSeat = null;
+    updateSeatTransforms();
+  }
+
+  applyStoredAvatarIfNeeded();
   updatePanelAutoBehavior();
   showSections();
   updateHud();
@@ -898,6 +1241,7 @@ function applySnapshot(room) {
   updateTrumpControls();
   renderHandsAndTrick();
   renderAvatars();
+  roomChangingAvatarOptimistic = false;
 }
 
 function sendAction(action, payload = {}) {
@@ -917,14 +1261,15 @@ function connect() {
   });
 
   ws.addEventListener('close', () => {
-    infoMessage = 'Disconnected from server.';
     roomState = null;
     localClientId = null;
+    lastLocalSeat = null;
     updateHud();
     showSections();
     setPanelOpen(true);
     renderHandsAndTrick();
     updateNameplates();
+    renderAvatars();
   });
 
   ws.addEventListener('message', (event) => {
@@ -937,8 +1282,7 @@ function connect() {
 
     if (data.type === 'welcome') {
       localClientId = data.clientId;
-      infoMessage = `Connected as ${localClientId}`;
-      roomStatus.textContent = infoMessage;
+      roomStatus.textContent = `Connected as ${localClientId}`;
       return;
     }
 
@@ -948,12 +1292,25 @@ function connect() {
       return;
     }
 
+    if (data.type === 'player:update') {
+      if (!roomState || !Number.isInteger(data.seatIndex)) return;
+      const seat = roomState.seats?.[data.seatIndex];
+      if (!seat) return;
+      seat.avatarId = data.avatarId;
+      renderAvatars();
+      renderSeatControls();
+      return;
+    }
+
     if (data.type === 'snapshot') {
       applySnapshot(data.room);
       return;
     }
 
     if (data.type === 'error') {
+      if (roomChangingAvatarOptimistic) {
+        roomChangingAvatarOptimistic = false;
+      }
       logMessage(data.message || 'Action rejected', 3300);
       return;
     }
@@ -978,9 +1335,7 @@ function initHdrEnvironment() {
       texture.dispose();
     },
     undefined,
-    () => {
-      fallbackEnv();
-    }
+    fallbackEnv
   );
 }
 
@@ -1004,6 +1359,7 @@ function ensureButtons() {
     showSections();
     renderHandsAndTrick();
     updateNameplates();
+    renderAvatars();
   });
 
   document.getElementById('startGameBtn').addEventListener('click', () => {
@@ -1022,6 +1378,13 @@ function ensureButtons() {
     setPanelOpen(false);
   });
 
+  changeAvatarBtn.addEventListener('click', () => {
+    openAvatarModal();
+  });
+
+  avatarModalBackdrop.addEventListener('click', closeAvatarModal);
+  closeAvatarModalBtn.addEventListener('click', closeAvatarModal);
+
   window.addEventListener('keydown', (event) => {
     if (event.key.toLowerCase() === 'd' && event.shiftKey) {
       debugVisible = !debugVisible;
@@ -1029,18 +1392,11 @@ function ensureButtons() {
       axesHelper.visible = debugVisible;
       logMessage(`Debug ${debugVisible ? 'on' : 'off'}`);
     }
+
+    if (event.key === 'Escape' && !avatarModal.classList.contains('hidden')) {
+      closeAvatarModal();
+    }
   });
-}
-
-function animate() {
-  requestAnimationFrame(animate);
-  renderer.render(scene, camera);
-}
-
-function onResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
 function addPointerInteraction() {
@@ -1059,39 +1415,75 @@ function addPointerInteraction() {
     const selected = intersects.find((hit) => hit.object?.userData?.clickable);
     if (!selected) return;
 
-    const tileId = selected.object.userData.tileId;
-    if (!tileId) return;
-    sendAction('playTile', { tileId });
+    const pickedId = selected.object.userData.tileId;
+    if (!pickedId) return;
+    sendAction('playTile', { tileId: pickedId });
   });
 }
 
-async function loadAvatarCatalog() {
-  try {
-    const res = await fetch('/assets/avatars/avatars.json', { cache: 'no-cache' });
-    if (!res.ok) return;
-    const data = await res.json();
-    if (!Array.isArray(data)) return;
-
-    avatarCatalog.length = 0;
-    avatarById.clear();
-    for (const item of data) {
-      if (!item?.id || !item?.url) continue;
-      avatarCatalog.push(item);
-      avatarById.set(item.id, item);
-    }
-  } catch {
-    // Keep running with default avatar fallback.
-  }
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-function initAvatarSeats() {
-  const local = getLocalSeat();
-  for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
-    const rel = toRelativeSeat(seatIndex, local);
-    const anchor = layoutSeatAnchor(rel);
-    seatAvatarGroup[seatIndex].position.set(anchor.x, PLAY_PLANE_Y + 0.05, anchor.z);
-    seatAvatarGroup[seatIndex].rotation.y = anchor.rotY + Math.PI;
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  for (const mixer of seatMixers.values()) {
+    mixer.update(dt);
   }
+  renderer.render(scene, camera);
+}
+
+async function loadAvatarManifest() {
+  const fallback = async () => {
+    const res = await fetch('/assets/avatars/avatars.json', { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    return data
+      .filter((entry) => entry?.id && entry?.url && !entry.url.includes('._'))
+      .map((entry) => ({ id: entry.id, name: entry.label || entry.id, file: entry.url }));
+  };
+
+  let entries = [];
+  try {
+    const res = await fetch('/assets/avatars/manifest.json', { cache: 'no-cache' });
+    if (!res.ok) {
+      entries = await fallback();
+    } else {
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        entries = await fallback();
+      } else {
+        entries = data
+          .filter((entry) => entry?.id && entry?.file && !entry.file.includes('._'))
+          .map((entry) => ({
+            id: String(entry.id),
+            name: String(entry.name || entry.id),
+            file: String(entry.file)
+          }));
+      }
+    }
+  } catch {
+    entries = await fallback();
+  }
+
+  avatarCatalog.length = 0;
+  avatarById.clear();
+
+  entries.forEach((entry) => {
+    avatarCatalog.push(entry);
+    avatarById.set(entry.id, entry);
+  });
+
+  if (avatarCatalog.length > 0 && !avatarById.has(DEFAULT_AVATAR_ID)) {
+    const first = avatarCatalog[0].id;
+    avatarById.set(DEFAULT_AVATAR_ID, avatarById.get(first));
+  }
+
+  buildAvatarPickerGrid();
 }
 
 window.addEventListener('resize', onResize);
@@ -1099,13 +1491,19 @@ window.addEventListener('resize', onResize);
 initHdrEnvironment();
 ensureButtons();
 addPointerInteraction();
+showSections();
+setPanelOpen(true);
+updateScoreboard();
 connect();
-loadAvatarCatalog().then(() => {
-  if (roomState) {
+
+Promise.all([loadAvatarManifest(), loadEnvironmentModels()])
+  .then(() => {
     renderSeatControls();
     renderAvatars();
-  }
-});
-initAvatarSeats();
+  })
+  .catch(() => {
+    // Keep running with runtime fallbacks.
+  });
+
 updateNameplates();
 animate();

@@ -1,0 +1,222 @@
+[
+  {
+    "id": "bluesoldier_male",
+    "name": "Blue Soldier Male",
+    "file": "/assets/avatars/glb/BlueSoldier_Male.gltf"
+  },
+  {
+    "id": "casual2_male",
+    "name": "Casual 2 Male",
+    "file": "/assets/avatars/glb/Casual2_Male.gltf"
+  },
+  {
+    "id": "casual3_male",
+    "name": "Casual 3 Male",
+    "file": "/assets/avatars/glb/Casual3_Male.gltf"
+  },
+  {
+    "id": "casual_male",
+    "name": "Casual Male",
+    "file": "/assets/avatars/glb/Casual_Male.gltf"
+  },
+  {
+    "id": "chef_male",
+    "name": "Chef Male",
+    "file": "/assets/avatars/glb/Chef_Male.gltf"
+  },
+  {
+    "id": "cowboy_male",
+    "name": "Cowboy Male",
+    "file": "/assets/avatars/glb/Cowboy_Male.gltf"
+  },
+  {
+    "id": "doctor_male_old",
+    "name": "Doctor Male Old",
+    "file": "/assets/avatars/glb/Doctor_Male_Old.gltf"
+  },
+  {
+    "id": "doctor_male_young",
+    "name": "Doctor Male Young",
+    "file": "/assets/avatars/glb/Doctor_Male_Young.gltf"
+  },
+  {
+    "id": "goblin_male",
+    "name": "Goblin Male",
+    "file": "/assets/avatars/glb/Goblin_Male.gltf"
+  },
+  {
+    "id": "kimono_male",
+    "name": "Kimono Male",
+    "file": "/assets/avatars/glb/Kimono_Male.gltf"
+  },
+  {
+    "id": "knight_golden_male",
+    "name": "Knight Golden Male",
+    "file": "/assets/avatars/glb/Knight_Golden_Male.gltf"
+  },
+  {
+    "id": "knight_male",
+    "name": "Knight Male",
+    "file": "/assets/avatars/glb/Knight_Male.gltf"
+  },
+  {
+    "id": "ninja_male",
+    "name": "Ninja Male",
+    "file": "/assets/avatars/glb/Ninja_Male.gltf"
+  },
+  {
+    "id": "oldclassy_male",
+    "name": "Old Classy Male",
+    "file": "/assets/avatars/glb/OldClassy_Male.gltf"
+  },
+  {
+    "id": "pirate_male",
+    "name": "Pirate Male",
+    "file": "/assets/avatars/glb/Pirate_Male.gltf"
+  },
+  {
+    "id": "soldier_male",
+    "name": "Soldier Male",
+    "file": "/assets/avatars/glb/Soldier_Male.gltf"
+  },
+  {
+    "id": "suit_male",
+    "name": "Suit Male",
+    "file": "/assets/avatars/glb/Suit_Male.gltf"
+  },
+  {
+    "id": "viking_male",
+    "name": "Viking Male",
+    "file": "/assets/avatars/glb/Viking_Male.gltf"
+  },
+  {
+    "id": "worker_male",
+    "name": "Worker Male",
+    "file": "/assets/avatars/glb/Worker_Male.gltf"
+  },
+  {
+    "id": "zombie_male",
+    "name": "Zombie Male",
+    "file": "/assets/avatars/glb/Zombie_Male.gltf"
+  },
+  {
+    "id": "bluesoldier_female",
+    "name": "Blue Soldier Female",
+    "file": "/assets/avatars/glb/BlueSoldier_Female.gltf"
+  },
+  {
+    "id": "casual2_female",
+    "name": "Casual 2 Female",
+    "file": "/assets/avatars/glb/Casual2_Female.gltf"
+  },
+  {
+    "id": "casual3_female",
+    "name": "Casual 3 Female",
+    "file": "/assets/avatars/glb/Casual3_Female.gltf"
+  },
+  {
+    "id": "casual_female",
+    "name": "Casual Female",
+    "file": "/assets/avatars/glb/Casual_Female.gltf"
+  },
+  {
+    "id": "chef_female",
+    "name": "Chef Female",
+    "file": "/assets/avatars/glb/Chef_Female.gltf"
+  },
+  {
+    "id": "cowboy_female",
+    "name": "Cowboy Female",
+    "file": "/assets/avatars/glb/Cowboy_Female.gltf"
+  },
+  {
+    "id": "doctor_female_old",
+    "name": "Doctor Female Old",
+    "file": "/assets/avatars/glb/Doctor_Female_Old.gltf"
+  },
+  {
+    "id": "doctor_female_young",
+    "name": "Doctor Female Young",
+    "file": "/assets/avatars/glb/Doctor_Female_Young.gltf"
+  },
+  {
+    "id": "goblin_female",
+    "name": "Goblin Female",
+    "file": "/assets/avatars/glb/Goblin_Female.gltf"
+  },
+  {
+    "id": "kimono_female",
+    "name": "Kimono Female",
+    "file": "/assets/avatars/glb/Kimono_Female.gltf"
+  },
+  {
+    "id": "knight_golden_female",
+    "name": "Knight Golden Female",
+    "file": "/assets/avatars/glb/Knight_Golden_Female.gltf"
+  },
+  {
+    "id": "ninja_female",
+    "name": "Ninja Female",
+    "file": "/assets/avatars/glb/Ninja_Female.gltf"
+  },
+  {
+    "id": "ninja_sand_female",
+    "name": "Ninja Sand Female",
+    "file": "/assets/avatars/glb/Ninja_Sand_Female.gltf"
+  },
+  {
+    "id": "oldclassy_female",
+    "name": "Old Classy Female",
+    "file": "/assets/avatars/glb/OldClassy_Female.gltf"
+  },
+  {
+    "id": "pirate_female",
+    "name": "Pirate Female",
+    "file": "/assets/avatars/glb/Pirate_Female.gltf"
+  },
+  {
+    "id": "soldier_female",
+    "name": "Soldier Female",
+    "file": "/assets/avatars/glb/Soldier_Female.gltf"
+  },
+  {
+    "id": "suit_female",
+    "name": "Suit Female",
+    "file": "/assets/avatars/glb/Suit_Female.gltf"
+  },
+  {
+    "id": "viking_female",
+    "name": "Viking Female",
+    "file": "/assets/avatars/glb/Viking_Female.gltf"
+  },
+  {
+    "id": "worker_female",
+    "name": "Worker Female",
+    "file": "/assets/avatars/glb/Worker_Female.gltf"
+  },
+  {
+    "id": "zombie_female",
+    "name": "Zombie Female",
+    "file": "/assets/avatars/glb/Zombie_Female.gltf"
+  },
+  {
+    "id": "elf",
+    "name": "Elf",
+    "file": "/assets/avatars/glb/Elf.gltf"
+  },
+  {
+    "id": "ninja_sand",
+    "name": "Ninja Sand",
+    "file": "/assets/avatars/glb/Ninja_Sand.gltf"
+  },
+  {
+    "id": "witch",
+    "name": "Witch",
+    "file": "/assets/avatars/glb/Witch.gltf"
+  },
+  {
+    "id": "wizard",
+    "name": "Wizard",
+    "file": "/assets/avatars/glb/Wizard.gltf"
+  }
+]
