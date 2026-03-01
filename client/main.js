@@ -8,7 +8,6 @@ import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { SEATS, toRelativeSeat } from '/src/scene/seats.js';
-import { emitSafe, getSocket, isConnected, onStatusChange } from '/src/net/socket.js';
 
 const MODES = {
   TRUMPS: 'trumps',
@@ -34,8 +33,6 @@ const DEFAULT_AVATAR_ID = 'cowboy_male';
 const AVATAR_STORAGE_KEY = 'avatarId';
 const PLAYER_NAME_STORAGE_KEY = 'playerName';
 const VIEW_STORAGE_KEY = 'texas42_view_settings_v1';
-const PLAYER_ID_STORAGE_KEY = 'texas42_player_id';
-const CLIENT_VERSION = '1.0.0';
 
 const canvas = document.getElementById('gameCanvas');
 const panel = document.getElementById('sidePanel');
@@ -45,7 +42,6 @@ const changeAvatarBtn = document.getElementById('changeAvatarBtn');
 const roomIdInput = document.getElementById('roomIdInput');
 const roomStatus = document.getElementById('roomStatus');
 const eventLog = document.getElementById('eventLog');
-const socketStatusBadge = document.getElementById('socketStatusBadge');
 const seatControls = document.getElementById('seatControls');
 const hudBidValue = document.getElementById('hudBidValue');
 const hudTrumpValue = document.getElementById('hudTrumpValue');
@@ -59,11 +55,6 @@ const environmentSelect = document.getElementById('environmentSelect');
 const environmentPreview = document.getElementById('environmentPreview');
 const environmentStateText = document.getElementById('environmentStateText');
 const emojiOverlays = document.getElementById('emojiOverlays');
-const networkStatusValue = document.getElementById('networkStatusValue');
-const networkUrlValue = document.getElementById('networkUrlValue');
-const networkLastConnectValue = document.getElementById('networkLastConnectValue');
-const networkLastDisconnectValue = document.getElementById('networkLastDisconnectValue');
-const reconnectNowBtn = document.getElementById('reconnectNowBtn');
 
 const sectionRoom = document.getElementById('section-room');
 const sectionPlayers = document.getElementById('section-players');
@@ -310,6 +301,7 @@ const DEFAULT_VIEW_SETTINGS = {
 
 const viewSettings = { ...DEFAULT_VIEW_SETTINGS };
 
+let ws = null;
 let localClientId = null;
 let roomState = null;
 let panelOpen = true;
@@ -323,13 +315,6 @@ let roomChangingAvatarOptimistic = false;
 let hoveredDominoMesh = null;
 let selectedDominoTileId = null;
 let pendingLocalBidChoice = null;
-let socketStatus = 'connecting';
-let socketUrl = window.location.origin;
-let networkLastConnectAt = null;
-let networkLastDisconnectReason = '';
-let socketHandlersBound = false;
-let lastDisconnectedToastAt = 0;
-localClientId = localStorage.getItem(PLAYER_ID_STORAGE_KEY) || null;
 
 function logMessage(text, timeoutMs = 2600) {
   eventLog.textContent = text;
@@ -341,56 +326,6 @@ function logMessage(text, timeoutMs = 2600) {
         eventLog.textContent = '';
       }
     }, timeoutMs);
-  }
-}
-
-function formatNetworkTime(ts) {
-  if (!Number.isFinite(ts)) return '—';
-  return new Date(ts).toLocaleTimeString();
-}
-
-function updateSocketUi() {
-  const status = socketStatus;
-  const connected = status === 'connected';
-  const statusLabel = connected ? 'Connected' : status === 'connecting' ? 'Connecting' : 'Disconnected';
-  const statusClass = connected ? 'connected' : status === 'connecting' ? 'connecting' : 'disconnected';
-
-  if (socketStatusBadge) {
-    socketStatusBadge.textContent = statusLabel;
-    socketStatusBadge.classList.remove('connected', 'connecting', 'disconnected');
-    socketStatusBadge.classList.add(statusClass);
-  }
-
-  if (networkStatusValue) {
-    networkStatusValue.textContent = statusLabel;
-    networkStatusValue.classList.remove('connected', 'connecting', 'disconnected');
-    networkStatusValue.classList.add(statusClass);
-  }
-  if (networkUrlValue) {
-    networkUrlValue.textContent = socketUrl || window.location.origin;
-  }
-  if (networkLastConnectValue) {
-    networkLastConnectValue.textContent = formatNetworkTime(networkLastConnectAt);
-  }
-  if (networkLastDisconnectValue) {
-    networkLastDisconnectValue.textContent = networkLastDisconnectReason || '—';
-  }
-  if (reconnectNowBtn) {
-    reconnectNowBtn.disabled = connected;
-  }
-
-  const connectionOnlyControls = [
-    'createRoomBtn',
-    'joinRoomBtn',
-    'leaveRoomBtn',
-    'startGameBtn',
-    'restartGameBtn',
-    'changeAvatarBtn'
-  ];
-  for (const id of connectionOnlyControls) {
-    const node = document.getElementById(id);
-    if (!node) continue;
-    node.disabled = !connected;
   }
 }
 
@@ -2263,10 +2198,9 @@ function updateTimerControls() {
   const isHost = roomState?.hostClientId === localClientId;
   const enabled = !!roomState?.turnTimerEnabled;
   const paused = !!roomState?.turnTimerPaused;
-  const connected = isConnected();
   timerEnabledToggle.checked = enabled;
-  timerEnabledToggle.disabled = !connected || !isHost || !roomState;
-  timerPauseBtn.disabled = !connected || !isHost || !roomState || !enabled;
+  timerEnabledToggle.disabled = !isHost || !roomState;
+  timerPauseBtn.disabled = !isHost || !roomState || !enabled;
   timerPauseBtn.textContent = paused ? 'Resume Timer' : 'Pause Timer';
 
   if (!roomState) {
@@ -2317,7 +2251,7 @@ function updateEnvironmentControls() {
   }
 
   const isHost = roomState?.hostClientId === localClientId;
-  environmentSelect.disabled = !isConnected() || !roomState || !isHost;
+  environmentSelect.disabled = !roomState || !isHost;
   if (!roomState) {
     environmentStateText.textContent = `Current: ${entry?.name || safeId}`;
   } else if (isHost) {
@@ -2432,10 +2366,6 @@ function buildAvatarPickerGrid() {
 }
 
 function openAvatarModal() {
-  if (!isConnected()) {
-    logMessage('Not connected to server.', 1800);
-    return;
-  }
   const localSeat = getLocalSeat();
   if (localSeat == null) {
     logMessage('Claim a human seat before changing avatar.');
@@ -2474,7 +2404,6 @@ function renderSeatControls() {
 
   const localSeat = getLocalSeat();
   const isHost = roomState.hostClientId === localClientId;
-  const connected = isConnected();
 
   roomState.seats.forEach((seat) => {
     const card = document.createElement('div');
@@ -2492,19 +2421,19 @@ function renderSeatControls() {
         <span class="seatBadge ${typeClass}">${seat.type.toUpperCase()}</span>
       </div>
       <div class="seatGrid">
-        <button data-action="claim" data-seat="${seat.seatIndex}" ${(!connected || roomState.phase !== PHASES.LOBBY || seat.occupantClientId) ? 'disabled' : ''}>Claim</button>
-        <button data-action="release" data-seat="${seat.seatIndex}" ${(!connected || roomState.phase !== PHASES.LOBBY || (!occupiedByMe && !isHost) || !seat.occupantClientId) ? 'disabled' : ''}>Release</button>
+        <button data-action="claim" data-seat="${seat.seatIndex}" ${roomState.phase !== PHASES.LOBBY || seat.occupantClientId ? 'disabled' : ''}>Claim</button>
+        <button data-action="release" data-seat="${seat.seatIndex}" ${(roomState.phase !== PHASES.LOBBY || (!occupiedByMe && !isHost) || !seat.occupantClientId) ? 'disabled' : ''}>Release</button>
       </div>
       <div class="controlRow">
         <label>Seat Type</label>
-        <select data-action="setType" data-seat="${seat.seatIndex}" ${(!connected || !isHost || roomState.phase !== PHASES.LOBBY) ? 'disabled' : ''}>
+        <select data-action="setType" data-seat="${seat.seatIndex}" ${(!isHost || roomState.phase !== PHASES.LOBBY) ? 'disabled' : ''}>
           <option value="human" ${seat.type === 'human' ? 'selected' : ''}>human</option>
           <option value="cpu" ${seat.type === 'cpu' ? 'selected' : ''}>cpu</option>
         </select>
       </div>
       <div class="controlRow">
         <label>CPU Level</label>
-        <select data-action="setCpu" data-seat="${seat.seatIndex}" ${(!connected || !isHost || roomState.phase !== PHASES.LOBBY) ? 'disabled' : ''}>
+        <select data-action="setCpu" data-seat="${seat.seatIndex}" ${(!isHost || roomState.phase !== PHASES.LOBBY) ? 'disabled' : ''}>
           <option value="0" ${seat.cpuLevel === 0 ? 'selected' : ''}>0</option>
           <option value="1" ${seat.cpuLevel === 1 ? 'selected' : ''}>1</option>
           <option value="2" ${seat.cpuLevel === 2 ? 'selected' : ''}>2</option>
@@ -2514,14 +2443,14 @@ function renderSeatControls() {
       </div>
       <div class="controlRow">
         <label>Avatar</label>
-        <select data-action="avatar" data-seat="${seat.seatIndex}" ${(connected && canAvatarEdit) ? '' : 'disabled'}>
+        <select data-action="avatar" data-seat="${seat.seatIndex}" ${canAvatarEdit ? '' : 'disabled'}>
           ${avatarCatalog.map((entry) => `<option value="${entry.id}" ${entry.id === seat.avatarId ? 'selected' : ''}>${entry.name}</option>`).join('')}
         </select>
       </div>
       <div class="controlRow">
         <label>Name</label>
-        <input data-action="nameInput" data-seat="${seat.seatIndex}" maxlength="24" value="${currentName.replace(/"/g, '&quot;')}" ${(connected && canNameEdit) ? '' : 'disabled'} />
-        <button data-action="nameSave" data-seat="${seat.seatIndex}" ${(connected && canNameEdit) ? '' : 'disabled'}>Save Name</button>
+        <input data-action="nameInput" data-seat="${seat.seatIndex}" maxlength="24" value="${currentName.replace(/"/g, '&quot;')}" ${canNameEdit ? '' : 'disabled'} />
+        <button data-action="nameSave" data-seat="${seat.seatIndex}" ${canNameEdit ? '' : 'disabled'}>Save Name</button>
       </div>
       <div class="smallText">${seat.occupantClientId ? `Client ${seat.occupantClientId}` : (seat.type === 'cpu' ? 'CPU seat' : 'Unclaimed')}</div>
     `;
@@ -2592,9 +2521,9 @@ function renderSeatControls() {
   });
 
   if (localSeat != null) {
-    roomStatus.textContent = `Room ${roomState.roomId} | You are seat ${localSeat + 1}${isHost ? ' (Host)' : ''} | ${socketStatus}`;
+    roomStatus.textContent = `Room ${roomState.roomId} | You are seat ${localSeat + 1}${isHost ? ' (Host)' : ''}`;
   } else {
-    roomStatus.textContent = roomState ? `Room ${roomState.roomId}${isHost ? ' | Host' : ''} | ${socketStatus}` : '';
+    roomStatus.textContent = roomState ? `Room ${roomState.roomId}${isHost ? ' | Host' : ''}` : '';
   }
 }
 
@@ -2610,7 +2539,6 @@ function updateBidControls() {
   bidButtonsWrap.innerHTML = '';
   const passBtn = document.getElementById('passBidBtn');
   pendingLocalBidChoice = null;
-  const connected = isConnected();
 
   if (!roomState || roomState.phase !== PHASES.BIDDING) {
     passBtn.disabled = true;
@@ -2618,7 +2546,7 @@ function updateBidControls() {
     return;
   }
 
-  const canBid = connected && localTurnToBid();
+  const canBid = localTurnToBid();
   passBtn.disabled = !canBid;
 
   const highBid = getCurrentHighBid();
@@ -2660,9 +2588,8 @@ function updateTrumpControls() {
   trumpButtonsWrap.innerHTML = '';
 
   const modeButtons = Array.from(modeButtonsWrap.querySelectorAll('button'));
-  const connected = isConnected();
-  const canChooseMode = connected && roomState && roomState.phase === PHASES.CHOOSE_MODE && localIsBidder();
-  const canChooseTrump = connected && roomState && roomState.phase === PHASES.CHOOSE_TRUMP && localIsBidder() && roomState.mode === MODES.TRUMPS;
+  const canChooseMode = roomState && roomState.phase === PHASES.CHOOSE_MODE && localIsBidder();
+  const canChooseTrump = roomState && roomState.phase === PHASES.CHOOSE_TRUMP && localIsBidder() && roomState.mode === MODES.TRUMPS;
 
   modeButtons.forEach((btn) => {
     const mode = btn.dataset.mode;
@@ -2735,10 +2662,6 @@ function applyStoredNameIfNeeded() {
 }
 
 function applySnapshot(room) {
-  if (room?.localClientId) {
-    localClientId = String(room.localClientId);
-    localStorage.setItem(PLAYER_ID_STORAGE_KEY, localClientId);
-  }
   const prevPhase = roomState?.phase || null;
   const prevLocalSeat = lastLocalSeat;
   roomState = room;
@@ -2786,199 +2709,125 @@ function applySnapshot(room) {
   roomChangingAvatarOptimistic = false;
 }
 
-function resetRoomLocally() {
-  roomState = null;
-  lastLocalSeat = null;
-  clearTimeoutPenaltyEmojis();
-  applyEnvironment('default_lounge');
-  updateHud();
-  showSections();
-  setPanelOpen(true);
-  renderHandsAndTrick();
-  updateNameplates();
-  renderAvatars();
-  resetViewForLocalSeat(true);
-}
-
-function sendClientHello() {
-  emitSafe('client:hello', {
-    clientVersion: CLIENT_VERSION,
-    lastKnownGameId: roomState?.roomId || roomIdInput.value.trim() || null,
-    lastKnownPlayerId: localClientId || localStorage.getItem(PLAYER_ID_STORAGE_KEY) || null,
-    lastKnownSeat: Number.isInteger(lastLocalSeat) ? lastLocalSeat : null,
-    playerName: getStoredPlayerName()
-  }, { requireConnected: false });
-}
-
-function handleServerPacket(data) {
-  if (!data || typeof data !== 'object') return;
-
-  if (data.type === 'welcome') {
-    if (data.clientId) {
-      localClientId = data.clientId;
-      localStorage.setItem(PLAYER_ID_STORAGE_KEY, localClientId);
-      renderSeatControls();
-      updateNameplates();
-    }
-    roomStatus.textContent = `Connected as ${localClientId || 'unknown'}`;
-    return;
-  }
-
-  if (data.type === 'roomCreated') {
-    roomIdInput.value = data.roomId;
-    logMessage(`Room ${data.roomId} created`);
-    return;
-  }
-
-  if (data.type === 'player:update') {
-    if (!roomState || !Number.isInteger(data.seatIndex)) return;
-    const seat = roomState.seats?.[data.seatIndex];
-    if (!seat) return;
-    if (data.avatarId != null) seat.avatarId = data.avatarId;
-    if (typeof data.name === 'string') seat.name = data.name;
-    renderAvatars();
-    updateNameplates();
-    renderSeatControls();
-    return;
-  }
-
-  if (data.type === 'game:timerUpdate') {
-    if (!roomState) return;
-    roomState.turnTimerEnabled = !!data.turnTimerEnabled;
-    roomState.turnTimerPaused = !!data.turnTimerPaused;
-    roomState.turnTimeLimitMs = Number(data.turnTimeLimitMs || 60000);
-    roomState.turnDeadlineTs = data.turnDeadlineTs == null ? null : Number(data.turnDeadlineTs);
-    roomState.turnRemainingMs = Number(data.remainingMs ?? roomState.turnRemainingMs ?? roomState.turnTimeLimitMs);
-    roomState.activeTurnId = Number(data.activeTurnId ?? roomState.activeTurnId ?? 0);
-    updateTimerControls();
-    return;
-  }
-
-  if (data.type === 'game:autoMove') {
-    if (Number.isInteger(data.seat)) {
-      logMessage(`Seat ${Number(data.seat) + 1} auto-played on timeout.`);
-    }
-    return;
-  }
-
-  if (data.type === 'game:timeoutPenalty') {
-    if (Number.isInteger(data.seat)) {
-      showTimeoutPenaltyEmoji(
-        data.seat,
-        data.emoji || '🤡',
-        Number(data.durationMs || 3000),
-        data.activeTurnId ?? null
-      );
-    }
-    return;
-  }
-
-  if (data.type === 'game:environmentChanged') {
-    if (!roomState) return;
-    roomState.environmentId = data.environmentId || roomState.environmentId;
-    applyEnvironment(roomState.environmentId || 'default_lounge');
-    updateEnvironmentControls();
-    return;
-  }
-
-  if (data.type === 'snapshot') {
-    applySnapshot(data.room);
-    return;
-  }
-
-  if (data.type === 'error') {
-    if (roomChangingAvatarOptimistic) {
-      roomChangingAvatarOptimistic = false;
-    }
-    logMessage(data.message || 'Action rejected', 3300);
-    return;
-  }
-
-  if (data.type === 'info') {
-    logMessage(data.message || 'Info');
-  }
-}
-
 function sendAction(action, payload = {}) {
-  const sent = emitSafe('action', { action, payload }, { requireConnected: true });
-  if (!sent) {
-    if (Date.now() - lastDisconnectedToastAt > 900) {
-      lastDisconnectedToastAt = Date.now();
-      logMessage('Not connected to server.', 1800);
-    }
-    return false;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    logMessage('Socket not connected.');
+    return;
   }
-  return true;
+  ws.send(JSON.stringify({ action, payload }));
 }
 
 function connect() {
-  const socket = getSocket();
-  if (socketHandlersBound) {
-    return;
-  }
-  socketHandlersBound = true;
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${protocol}://${window.location.host}`);
 
-  onStatusChange((network) => {
-    socketStatus = network.status || 'disconnected';
-    socketUrl = network.socketUrl || window.location.origin;
-    if (network.status === 'disconnected' && network.lastError) {
-      networkLastDisconnectReason = String(network.lastError);
-    }
-    updateSocketUi();
-    updateTimerControls();
-    updateEnvironmentControls();
-    updateBidControls();
-    updateTrumpControls();
-    renderSeatControls();
-  });
-
-  socket.on('connect', () => {
-    networkLastConnectAt = Date.now();
-    networkLastDisconnectReason = '';
-    updateSocketUi();
-    sendClientHello();
+  ws.addEventListener('open', () => {
     logMessage('Connected', 1300);
   });
 
-  socket.on('disconnect', (reason) => {
-    networkLastDisconnectReason = String(reason || 'disconnect');
-    updateSocketUi();
-    updateTimerControls();
-    updateEnvironmentControls();
-    updateBidControls();
-    updateTrumpControls();
-    renderSeatControls();
-    logMessage('Disconnected from server.', 2000);
+  ws.addEventListener('close', () => {
+    roomState = null;
+    localClientId = null;
+    lastLocalSeat = null;
+    clearTimeoutPenaltyEmojis();
+    applyEnvironment('default_lounge');
+    updateHud();
+    showSections();
+    setPanelOpen(true);
+    renderHandsAndTrick();
+    updateNameplates();
+    renderAvatars();
+    resetViewForLocalSeat(true);
   });
 
-  socket.on('packet', (payload) => {
-    handleServerPacket(payload);
-  });
-
-  socket.on('game:state', (payload) => {
-    const fullState = payload?.fullState || null;
-    if (!fullState) {
-      resetRoomLocally();
+  ws.addEventListener('message', (event) => {
+    let data = null;
+    try {
+      data = JSON.parse(event.data);
+    } catch {
       return;
     }
-    applySnapshot(fullState);
-  });
 
-  socket.on('player:identity', (payload) => {
-    if (!payload || typeof payload !== 'object') return;
-    if (payload.playerId) {
-      localClientId = String(payload.playerId);
-      localStorage.setItem(PLAYER_ID_STORAGE_KEY, localClientId);
+    if (data.type === 'welcome') {
+      localClientId = data.clientId;
+      roomStatus.textContent = `Connected as ${localClientId}`;
+      return;
     }
-    renderSeatControls();
-    updateNameplates();
-  });
 
-  if (socket.connected) {
-    networkLastConnectAt = Date.now();
-    updateSocketUi();
-    sendClientHello();
-  }
+    if (data.type === 'roomCreated') {
+      roomIdInput.value = data.roomId;
+      logMessage(`Room ${data.roomId} created`);
+      return;
+    }
+
+    if (data.type === 'player:update') {
+      if (!roomState || !Number.isInteger(data.seatIndex)) return;
+      const seat = roomState.seats?.[data.seatIndex];
+      if (!seat) return;
+      if (data.avatarId != null) seat.avatarId = data.avatarId;
+      if (typeof data.name === 'string') seat.name = data.name;
+      renderAvatars();
+      updateNameplates();
+      renderSeatControls();
+      return;
+    }
+
+    if (data.type === 'game:timerUpdate') {
+      if (!roomState) return;
+      roomState.turnTimerEnabled = !!data.turnTimerEnabled;
+      roomState.turnTimerPaused = !!data.turnTimerPaused;
+      roomState.turnTimeLimitMs = Number(data.turnTimeLimitMs || 60000);
+      roomState.turnDeadlineTs = data.turnDeadlineTs == null ? null : Number(data.turnDeadlineTs);
+      roomState.turnRemainingMs = Number(data.remainingMs ?? roomState.turnRemainingMs ?? roomState.turnTimeLimitMs);
+      roomState.activeTurnId = Number(data.activeTurnId ?? roomState.activeTurnId ?? 0);
+      updateTimerControls();
+      return;
+    }
+
+    if (data.type === 'game:autoMove') {
+      if (Number.isInteger(data.seat)) {
+        logMessage(`Seat ${Number(data.seat) + 1} auto-played on timeout.`);
+      }
+      return;
+    }
+
+    if (data.type === 'game:timeoutPenalty') {
+      if (Number.isInteger(data.seat)) {
+        showTimeoutPenaltyEmoji(
+          data.seat,
+          data.emoji || '🤡',
+          Number(data.durationMs || 3000),
+          data.activeTurnId ?? null
+        );
+      }
+      return;
+    }
+
+    if (data.type === 'game:environmentChanged') {
+      if (!roomState) return;
+      roomState.environmentId = data.environmentId || roomState.environmentId;
+      applyEnvironment(roomState.environmentId || 'default_lounge');
+      updateEnvironmentControls();
+      return;
+    }
+
+    if (data.type === 'snapshot') {
+      applySnapshot(data.room);
+      return;
+    }
+
+    if (data.type === 'error') {
+      if (roomChangingAvatarOptimistic) {
+        roomChangingAvatarOptimistic = false;
+      }
+      logMessage(data.message || 'Action rejected', 3300);
+      return;
+    }
+
+    if (data.type === 'info') {
+      logMessage(data.message || 'Info');
+    }
+  });
 }
 
 function initHdrEnvironment() {
@@ -3014,10 +2863,15 @@ function ensureButtons() {
   });
 
   document.getElementById('leaveRoomBtn').addEventListener('click', () => {
-    if (!sendAction('leaveRoom')) {
-      return;
-    }
-    resetRoomLocally();
+    sendAction('leaveRoom');
+    roomState = null;
+    clearTimeoutPenaltyEmojis();
+    applyEnvironment('default_lounge');
+    showSections();
+    renderHandsAndTrick();
+    updateNameplates();
+    renderAvatars();
+    resetViewForLocalSeat(true);
   });
 
   document.getElementById('startGameBtn').addEventListener('click', () => {
@@ -3047,10 +2901,6 @@ function ensureButtons() {
     if (!roomState || roomState.hostClientId !== localClientId) return;
     if (!environmentById.has(environmentId)) return;
     sendAction('host:setEnvironment', { environmentId });
-  });
-
-  reconnectNowBtn?.addEventListener('click', () => {
-    getSocket().connect();
   });
 
   panelToggle.addEventListener('click', () => {
@@ -3192,14 +3042,6 @@ function addPointerInteraction() {
     selectedDominoTileId = pickedId;
     refreshHandVisuals();
 
-    if (!isConnected()) {
-      if (Date.now() - lastDisconnectedToastAt > 900) {
-        lastDisconnectedToastAt = Date.now();
-        logMessage('Not connected to server.', 1800);
-      }
-      return;
-    }
-
     if (!isMyTurnToPlay() || roomState.turnSeat !== localSeat) {
       logMessage('Not your turn yet.');
       return;
@@ -3339,7 +3181,6 @@ updateScoreboard();
 updateTimerControls();
 updateTimerHud();
 updateEnvironmentControls();
-updateSocketUi();
 resetViewForLocalSeat(true);
 connect();
 

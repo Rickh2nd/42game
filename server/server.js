@@ -3,7 +3,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Server as SocketIOServer } from 'socket.io';
+import { WebSocketServer } from 'ws';
 import {
   CONFIG_DEFAULTS,
   MODES,
@@ -76,32 +76,11 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(ROOT_DIR, 'client', 'index.html'));
 });
 
-const httpServer = http.createServer(app);
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
-  .split(',')
-  .map((value) => value.trim())
-  .filter(Boolean);
-const io = new SocketIOServer(httpServer, {
-  cors: {
-    origin(origin, callback) {
-      if (!origin) {
-        callback(null, true);
-        return;
-      }
-      if (!allowedOrigins.length || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-      callback(new Error('Origin not allowed by CORS'));
-    },
-    methods: ['GET', 'POST'],
-    credentials: true
-  }
-});
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
 
 const rooms = new Map();
 const clients = new Map();
-const socketToClientId = new Map();
 let clientCounter = 1;
 
 const PORT = Number(process.env.PORT || 8080);
@@ -139,18 +118,6 @@ function makeClientId() {
   const id = `c${clientCounter}`;
   clientCounter += 1;
   return id;
-}
-
-function normalizeExistingRoomId(raw) {
-  if (!raw || typeof raw !== 'string') {
-    return null;
-  }
-  const normalized = raw
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '')
-    .slice(0, 10);
-  return normalized || null;
 }
 
 function normalizeRoomId(raw) {
@@ -228,42 +195,18 @@ function createRoom(roomId, hostClientId) {
   };
 }
 
-function send(socket, payload) {
-  if (!socket || socket.disconnected) return;
-  socket.emit('packet', payload);
+function send(ws, payload) {
+  if (!ws || ws.readyState !== ws.OPEN) return;
+  ws.send(JSON.stringify(payload));
 }
 
 function sendError(clientId, action, message) {
   const client = clients.get(clientId);
   if (!client) return;
-  send(client.socket, {
+  send(client.ws, {
     type: 'error',
     action,
     message
-  });
-}
-
-function syncIdentityAndState(clientId) {
-  const client = clients.get(clientId);
-  if (!client?.socket) return;
-
-  send(client.socket, {
-    type: 'welcome',
-    clientId,
-    now: Date.now()
-  });
-
-  const room = client.roomId ? rooms.get(client.roomId) : null;
-  const fullState = room ? roomPublicSnapshot(room, clientId) : null;
-  const seat = room ? humanSeatForClient(room, clientId) : null;
-
-  client.socket.emit('game:state', {
-    fullState
-  });
-  client.socket.emit('player:identity', {
-    playerId: clientId,
-    seat: seat ? seat.seatIndex : null,
-    isHost: !!room && room.hostClientId === clientId
   });
 }
 
@@ -359,7 +302,7 @@ function broadcastRoom(room) {
   for (const clientId of room.clientIds) {
     const client = clients.get(clientId);
     if (!client) continue;
-    send(client.socket, {
+    send(client.ws, {
       type: 'snapshot',
       room: roomPublicSnapshot(room, clientId)
     });
@@ -370,7 +313,7 @@ function broadcastRoomEvent(room, payload) {
   for (const clientId of room.clientIds) {
     const client = clients.get(clientId);
     if (!client) continue;
-    send(client.socket, payload);
+    send(client.ws, payload);
   }
 }
 
@@ -983,7 +926,7 @@ function removeClientFromRoom(clientId, reason = 'left') {
     for (const otherClientId of room.clientIds) {
       const other = clients.get(otherClientId);
       if (!other) continue;
-      send(other.socket, {
+      send(other.ws, {
         type: 'info',
         message: `Client ${clientId} disconnected.`
       });
@@ -1431,7 +1374,7 @@ function handleAction(clientId, action, payload) {
     rooms.set(roomId, room);
     client.roomId = roomId;
 
-    send(client.socket, {
+    send(client.ws, {
       type: 'roomCreated',
       roomId
     });
@@ -1478,119 +1421,45 @@ function handleAction(clientId, action, payload) {
   handleRoomAction(room, clientId, action, payload || {});
 }
 
-function attachSocketToClient(socket, preferredClientId = null) {
-  const preferred = typeof preferredClientId === 'string' ? preferredClientId.trim() : '';
-  const currentClientId = socketToClientId.get(socket.id);
-  let clientId = currentClientId || makeClientId();
-
-  if (preferred) {
-    const existing = clients.get(preferred);
-    if (existing && (!existing.socket || existing.socket.id === socket.id)) {
-      clientId = preferred;
-    }
-  }
-
-  if (currentClientId && currentClientId !== clientId) {
-    const previous = clients.get(currentClientId);
-    if (previous && !previous.roomId) {
-      clients.delete(currentClientId);
-    } else if (previous) {
-      previous.socket = null;
-    }
-  }
-
-  const existingRecord = clients.get(clientId);
-  if (existingRecord) {
-    existingRecord.socket = socket;
-    existingRecord.lastSeenAt = Date.now();
-  } else {
-    clients.set(clientId, {
-      clientId,
-      socket,
-      roomId: null,
-      lastSeenAt: Date.now()
-    });
-  }
-
-  socketToClientId.set(socket.id, clientId);
-  return clientId;
-}
-
-function handleClientHello(socket, payload = {}) {
-  const requestedPlayerId = typeof payload?.lastKnownPlayerId === 'string'
-    ? payload.lastKnownPlayerId.trim().slice(0, 32)
-    : '';
-  const clientId = attachSocketToClient(socket, requestedPlayerId);
-  const client = clients.get(clientId);
-  if (!client) return;
-
-  if (!client.roomId) {
-    const hintedRoomId = normalizeExistingRoomId(payload?.lastKnownGameId);
-    if (hintedRoomId && rooms.has(hintedRoomId)) {
-      const room = rooms.get(hintedRoomId);
-      room.clientIds.add(clientId);
-      client.roomId = hintedRoomId;
-
-      const hintedSeat = Number(payload?.lastKnownSeat);
-      if (room.phase === PHASES.LOBBY && Number.isInteger(hintedSeat)) {
-        const seat = seatByIndex(room, hintedSeat);
-        if (seat && !seat.occupantClientId) {
-          seat.type = 'human';
-          seat.occupantClientId = clientId;
-          const hintedName = String(payload?.playerName || '').trim().slice(0, 24);
-          if (hintedName) {
-            seat.name = hintedName;
-          }
-        }
-      }
-
-      broadcastRoom(room);
-    }
-  }
-
-  if (client.roomId && !rooms.has(client.roomId)) {
-    client.roomId = null;
-  }
-
-  syncIdentityAndState(clientId);
-}
-
-io.on('connection', (socket) => {
-  const clientId = attachSocketToClient(socket);
-  syncIdentityAndState(clientId);
-
-  socket.on('client:hello', (payload) => {
-    handleClientHello(socket, payload || {});
+wss.on('connection', (ws) => {
+  const clientId = makeClientId();
+  clients.set(clientId, {
+    clientId,
+    ws,
+    roomId: null
   });
 
-  socket.on('action', (data) => {
-    const resolvedClientId = socketToClientId.get(socket.id);
-    if (!resolvedClientId) return;
+  send(ws, {
+    type: 'welcome',
+    clientId,
+    now: Date.now()
+  });
+
+  ws.on('message', (raw) => {
+    let data;
+    try {
+      data = JSON.parse(String(raw));
+    } catch {
+      sendError(clientId, 'parse', 'Invalid JSON payload.');
+      return;
+    }
 
     const action = data?.action;
     if (!action || typeof action !== 'string') {
-      sendError(resolvedClientId, 'unknown', 'Missing action.');
+      sendError(clientId, 'unknown', 'Missing action.');
       return;
     }
-    handleAction(resolvedClientId, action, data.payload || {});
+
+    handleAction(clientId, action, data.payload || {});
   });
 
-  socket.on('disconnect', () => {
-    const resolvedClientId = socketToClientId.get(socket.id);
-    if (!resolvedClientId) return;
-
-    socketToClientId.delete(socket.id);
-    const client = clients.get(resolvedClientId);
-    if (client && client.socket?.id === socket.id) {
-      client.socket = null;
-      client.lastSeenAt = Date.now();
-    }
-
-    removeClientFromRoom(resolvedClientId, 'disconnect');
+  ws.on('close', () => {
+    removeClientFromRoom(clientId, 'disconnect');
+    clients.delete(clientId);
   });
 });
 
-httpServer.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Texas 42 server listening on http://localhost:${PORT}`);
 });
 
