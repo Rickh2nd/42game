@@ -29,6 +29,7 @@ const DOMINO_Y = PLAY_PLANE_Y + DOMINO_THICKNESS / 2;
 
 const DEFAULT_AVATAR_ID = 'cowboy_male';
 const AVATAR_STORAGE_KEY = 'avatarId';
+const PLAYER_NAME_STORAGE_KEY = 'playerName';
 
 const canvas = document.getElementById('gameCanvas');
 const panel = document.getElementById('sidePanel');
@@ -41,6 +42,10 @@ const eventLog = document.getElementById('eventLog');
 const seatControls = document.getElementById('seatControls');
 const hudBidValue = document.getElementById('hudBidValue');
 const hudTrumpValue = document.getElementById('hudTrumpValue');
+const turnTimerHud = document.getElementById('turnTimerHud');
+const timerEnabledToggle = document.getElementById('timerEnabledToggle');
+const timerPauseBtn = document.getElementById('timerPauseBtn');
+const timerStateText = document.getElementById('timerStateText');
 
 const sectionRoom = document.getElementById('section-room');
 const sectionPlayers = document.getElementById('section-players');
@@ -84,8 +89,8 @@ const scene = new THREE.Scene();
 scene.background = null;
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(0, 9.8, 9.6);
-camera.lookAt(0, 0.8, 0);
+camera.position.set(0, 7.7, 6.95);
+camera.lookAt(0, 0.68, 0);
 
 const visualsGroup = new THREE.Group();
 visualsGroup.name = 'visualsGroup';
@@ -183,7 +188,6 @@ const mtlLoader = new MTLLoader();
 const textureCache = new Map();
 const modelCache = new Map();
 const activeAvatarLoadToken = new Map();
-const seatMixers = new Map();
 const environmentTemplates = {
   table: null,
   chair: null
@@ -219,7 +223,11 @@ let lastPhase = null;
 let lastLocalSeat = null;
 let debugVisible = false;
 let storedAvatarAppliedSeat = null;
+let storedNameAppliedSeat = null;
 let roomChangingAvatarOptimistic = false;
+let hoveredDominoMesh = null;
+let selectedDominoTileId = null;
+let pendingLocalBidChoice = null;
 
 function logMessage(text, timeoutMs = 2600) {
   eventLog.textContent = text;
@@ -238,6 +246,28 @@ function warnOnce(key, text) {
   if (oneShotWarnings.has(key)) return;
   oneShotWarnings.add(key);
   console.warn(text);
+}
+
+function getStoredPlayerName() {
+  const raw = (localStorage.getItem(PLAYER_NAME_STORAGE_KEY) || '').trim();
+  if (!raw) return 'Player';
+  return raw.slice(0, 24);
+}
+
+function formatTimerMs(ms) {
+  const safe = Math.max(0, Number(ms) || 0);
+  const total = Math.ceil(safe / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function currentTimerRemainingMs() {
+  if (!roomState?.turnTimerEnabled) return null;
+  if (roomState.turnTimerPaused || !roomState.turnDeadlineTs) {
+    return Number(roomState.turnRemainingMs ?? roomState.turnTimeLimitMs ?? 0);
+  }
+  return Math.max(0, Number(roomState.turnDeadlineTs) - Date.now());
 }
 
 function makeNoiseTexture(size, drawFn) {
@@ -374,16 +404,6 @@ function clampAvatarBaseY(baseY, seatIndex) {
     out = tableLimit;
   }
   return out;
-}
-
-function ensureNameplateTemplate(node, seatIndex) {
-  if (node.dataset.ready === '1') return;
-  node.dataset.ready = '1';
-  node.innerHTML = `
-    <div class="dragHandle" data-drag-seat="${seatIndex}" title="Drag">MOVE</div>
-    <div class="seatName"></div>
-    <div class="seatMeta"></div>
-  `;
 }
 
 function beginNameplateDrag(seatIndex, pointerId, clientX, clientY) {
@@ -568,6 +588,7 @@ function showSections() {
   } else if (roomState.phase === PHASES.CHOOSE_MODE || roomState.phase === PHASES.CHOOSE_TRUMP) {
     show.trump = true;
   } else if (roomState.phase === PHASES.PLAYING) {
+    show.game = true;
     show.marks = true;
     show.room = true;
   } else {
@@ -649,7 +670,7 @@ function updateMarksMenu() {
   renderTallies(menuMarksTeamB, marks.teamB);
 }
 
-function drawPips(ctx, value, xCenter) {
+function drawPips(ctx, value, xCenter, color) {
   const layout = {
     0: [],
     1: [[0, 0]],
@@ -661,6 +682,7 @@ function drawPips(ctx, value, xCenter) {
   };
 
   const positions = layout[value] || [];
+  ctx.fillStyle = color;
   for (const [x, y] of positions) {
     ctx.beginPath();
     ctx.arc(xCenter + x * 185, 128 + y * 205, 12, 0, Math.PI * 2);
@@ -673,11 +695,11 @@ function getDominoTexture(tile, options = {}) {
     faceUp = true,
     pipColor = '#111111',
     glowCount = false,
-    magentaTrump = false
+    trumpSuit = null
   } = options;
 
   const id = tile ? tile.id || tileId(tile) : 'back';
-  const key = `${id}:${faceUp ? 'up' : 'down'}:${pipColor}:${glowCount ? 1 : 0}:${magentaTrump ? 1 : 0}`;
+  const key = `${id}:${faceUp ? 'up' : 'down'}:${pipColor}:${glowCount ? 1 : 0}:t${trumpSuit == null ? 'n' : trumpSuit}`;
   if (textureCache.has(key)) return textureCache.get(key);
 
   const c = document.createElement('canvas');
@@ -705,7 +727,13 @@ function getDominoTexture(tile, options = {}) {
     ctx.strokeRect(8, 8, c.width - 16, c.height - 16);
 
     if (glowCount) {
-      ctx.fillStyle = 'rgba(255, 214, 97, 0.35)';
+      ctx.shadowColor = 'rgba(255, 212, 98, 0.9)';
+      ctx.shadowBlur = 26;
+      ctx.strokeStyle = 'rgba(255, 214, 104, 0.95)';
+      ctx.lineWidth = 12;
+      ctx.strokeRect(8, 8, c.width - 16, c.height - 16);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255, 214, 97, 0.22)';
       ctx.fillRect(0, 0, c.width, c.height);
     }
 
@@ -716,9 +744,10 @@ function getDominoTexture(tile, options = {}) {
     ctx.lineTo(256, 244);
     ctx.stroke();
 
-    ctx.fillStyle = magentaTrump ? '#cf3df6' : pipColor;
-    drawPips(ctx, tile.a, 128);
-    drawPips(ctx, tile.b, 384);
+    const leftColor = trumpSuit != null && tile.a === trumpSuit ? '#cf3df6' : pipColor;
+    const rightColor = trumpSuit != null && tile.b === trumpSuit ? '#cf3df6' : pipColor;
+    drawPips(ctx, tile.a, 128, leftColor);
+    drawPips(ctx, tile.b, 384, rightColor);
   }
 
   const tex = new THREE.CanvasTexture(c);
@@ -738,18 +767,18 @@ function createDominoMesh(tile, options = {}) {
     useMagentaTrump = false
   } = options;
 
-  const magentaTrump = useMagentaTrump && trumpSuit != null && tileContainsSuit(tile, trumpSuit);
+  const trumpTintSuit = useMagentaTrump && trumpSuit != null ? trumpSuit : null;
   const topTexture = getDominoTexture(tile, {
     faceUp,
     pipColor: '#121212',
     glowCount,
-    magentaTrump
+    trumpSuit: trumpTintSuit
   });
   const bottomTexture = getDominoTexture(tile, {
     faceUp: false,
     pipColor: '#111',
     glowCount: false,
-    magentaTrump: false
+    trumpSuit: null
   });
 
   const sideMat = new THREE.MeshStandardMaterial({ color: faceUp ? 0xf2ece1 : 0x2f3f4d, roughness: 0.9, metalness: 0.06 });
@@ -921,9 +950,7 @@ function buildFallbackAvatar() {
 }
 
 function clearSeatMixer(seatIndex) {
-  const existing = seatMixers.get(seatIndex);
-  if (!existing) return;
-  seatMixers.delete(seatIndex);
+  void seatIndex;
 }
 
 async function setSeatAvatarModel(seatIndex, avatarId) {
@@ -956,14 +983,9 @@ async function setSeatAvatarModel(seatIndex, avatarId) {
     normalizeAvatarModel(cloned.scene, 1.68);
     targetGroup.add(cloned.scene);
 
-    const sitClip = cloned.animations.find((clip) => /sit/i.test(clip.name));
-    if (sitClip) {
-      const mixer = new THREE.AnimationMixer(cloned.scene);
-      mixer.clipAction(sitClip).play();
-      seatMixers.set(seatIndex, mixer);
-    } else {
-      applyStaticSeatedPose(cloned.scene);
-    }
+    // Keep avatars fully static to avoid rocking/sway.
+    void cloned.animations;
+    applyStaticSeatedPose(cloned.scene);
     updateSeatTransforms();
   } catch {
     applyFallback();
@@ -973,20 +995,95 @@ async function setSeatAvatarModel(seatIndex, avatarId) {
 function setChairModelForSeat(seatIndex, chairTemplate) {
   const group = chairSeatGroups[seatIndex];
   clearGroup(group);
+
+  const createProceduralChair = () => {
+    const chair = new THREE.Group();
+    const wood = new THREE.MeshStandardMaterial({
+      map: woodTexture,
+      color: 0xf1f1f1,
+      roughness: 0.63,
+      metalness: 0.04
+    });
+    const cushionMat = new THREE.MeshStandardMaterial({
+      map: feltTexture,
+      color: 0xf2f2f2,
+      roughness: 0.92,
+      metalness: 0
+    });
+
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.09, 0.72), wood);
+    seat.position.set(0, 0.47, 0);
+    chair.add(seat);
+
+    const cushion = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.055, 0.66), cushionMat);
+    cushion.position.set(0, 0.545, -0.01);
+    chair.add(cushion);
+
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.72, 0.09), wood);
+    back.position.set(0, 0.83, -0.32);
+    chair.add(back);
+
+    const backTop = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.07, 0.11), wood);
+    backTop.position.set(0, 1.16, -0.33);
+    chair.add(backTop);
+
+    const legGeo = new THREE.BoxGeometry(0.085, 0.47, 0.085);
+    const legPositions = [
+      [-0.31, 0.235, 0.26],
+      [0.31, 0.235, 0.26],
+      [-0.31, 0.235, -0.26],
+      [0.31, 0.235, -0.26]
+    ];
+    legPositions.forEach(([x, y, z]) => {
+      const leg = new THREE.Mesh(legGeo, wood);
+      leg.position.set(x, y, z);
+      chair.add(leg);
+    });
+
+    const sideRailGeo = new THREE.BoxGeometry(0.085, 0.07, 0.52);
+    const sideRailL = new THREE.Mesh(sideRailGeo, wood);
+    sideRailL.position.set(-0.31, 0.37, 0.0);
+    const sideRailR = sideRailL.clone();
+    sideRailR.position.x = 0.31;
+    chair.add(sideRailL, sideRailR);
+
+    const frontRail = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.07, 0.085), wood);
+    frontRail.position.set(0, 0.37, 0.26);
+    chair.add(frontRail);
+
+    chair.traverse((node) => {
+      if (!node.isMesh) return;
+      node.castShadow = true;
+      node.receiveShadow = true;
+    });
+    return chair;
+  };
+
+  const meshCount = (obj) => {
+    let count = 0;
+    obj.traverse((node) => {
+      if (node.isMesh) count += 1;
+    });
+    return count;
+  };
+
   if (!chairTemplate) {
-    const fallback = new THREE.Mesh(
-      new THREE.BoxGeometry(0.62, 0.08, 0.62),
-      new THREE.MeshStandardMaterial({ color: 0x363f4d, roughness: 0.72, metalness: 0.1 })
-    );
-    fallback.position.y = 0.42;
-    fallback.castShadow = true;
-    fallback.receiveShadow = true;
+    const fallback = createProceduralChair();
     group.add(fallback);
-    seatRuntime[seatIndex].chairSeatY = 0.42;
+    seatRuntime[seatIndex].chairSeatY = 0.47;
     return;
   }
+
   const clone = clonedModelAsset(chairTemplate).scene;
   tuneImportedMaterials(clone);
+  const templateIsTooSimple = meshCount(clone) < 10;
+  if (templateIsTooSimple) {
+    const fallback = createProceduralChair();
+    group.add(fallback);
+    seatRuntime[seatIndex].chairSeatY = 0.47;
+    return;
+  }
+
   group.add(clone);
   seatRuntime[seatIndex].chairSeatY = findSeatAnchorY(clone);
 }
@@ -1030,11 +1127,38 @@ async function loadEnvironmentModels() {
     tableNode.add(felt);
   }
 
+  // Add a guaranteed felt cap + wood rim so the table always reads clearly.
+  tmpBox.setFromObject(tableNode);
+  const widthX = Math.max(0.1, tmpBox.max.x - tmpBox.min.x);
+  const widthZ = Math.max(0.1, tmpBox.max.z - tmpBox.min.z);
+  const radius = Math.max(1.85, Math.min(widthX, widthZ) * 0.43);
+  const topY = Number.isFinite(tmpBox.max.y) ? tmpBox.max.y : 0.64;
+
+  const feltCap = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, 0.026, 64),
+    buildTableMaterial('felt')
+  );
+  feltCap.position.y = topY + 0.015;
+  feltCap.receiveShadow = true;
+  feltCap.castShadow = false;
+  tableNode.add(feltCap);
+
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(radius + 0.1, 0.065, 16, 72),
+    buildTableMaterial('wood')
+  );
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = topY + 0.037;
+  rim.castShadow = true;
+  rim.receiveShadow = true;
+  tableNode.add(rim);
+
   const prevTable = environmentGroup.getObjectByName('tableModel');
   if (prevTable) {
     environmentGroup.remove(prevTable);
     clearGroup(prevTable);
   }
+  tableNode.scale.set(1.46, 1, 1.46);
   environmentGroup.add(tableNode);
   updateTableMetricsFromObject(tableNode);
 
@@ -1154,6 +1278,9 @@ function renderHandsAndTrick() {
   });
 
   renderBurnPiles();
+  if (typeof handGroup.userData.refreshSelection === 'function') {
+    handGroup.userData.refreshSelection();
+  }
 }
 
 function renderBurnPiles() {
@@ -1163,27 +1290,10 @@ function renderBurnPiles() {
 
   const aTiles = roomState.burnPiles?.teamA || [];
   const bTiles = roomState.burnPiles?.teamB || [];
-  const localSeat = getLocalSeat();
-
-  const pileAnchorForTeam = (teamSeatIndexes) => {
-    let sx = 0;
-    let sz = 0;
-    for (const seatIndex of teamSeatIndexes) {
-      const rel = toRelativeSeat(seatIndex, localSeat);
-      const anchor = SEATS[rel]?.handAnchor?.pos || [0, DOMINO_Y, 0];
-      sx += anchor[0];
-      sz += anchor[2];
-    }
-    const avgX = sx / teamSeatIndexes.length;
-    const avgZ = sz / teamSeatIndexes.length;
-    return { x: avgX * 0.74, z: avgZ * 0.74 };
-  };
-
-  const teamAAnchor = pileAnchorForTeam([0, 2]);
-  const teamBAnchor = pileAnchorForTeam([1, 3]);
-
-  const renderPile = (tiles, group, x, z, rotY) => {
-    const sample = tiles.slice(-12);
+  const renderPile = (tiles, group, xBase, zBase) => {
+    const sample = tiles.slice(-16);
+    const colGap = 0.26;
+    const rowGap = 0.71;
     sample.forEach((tile, i) => {
       const mesh = createDominoMesh(tile, {
         faceUp: true,
@@ -1192,22 +1302,27 @@ function renderBurnPiles() {
         trumpSuit: roomState.trumpSuit,
         useMagentaTrump: roomState.mode === MODES.TRUMPS
       });
-      mesh.position.set(x + (i % 4) * 0.12, DOMINO_Y + i * 0.01, z + Math.floor(i / 4) * 0.1);
-      mesh.rotation.y = rotY;
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      mesh.position.set(xBase + col * colGap, DOMINO_Y + row * 0.012, zBase + row * rowGap);
+      mesh.rotation.y = Math.PI / 2;
       group.add(mesh);
     });
   };
 
-  renderPile(aTiles, burnGroupA, teamAAnchor.x, teamAAnchor.z, 0.18);
-  renderPile(bTiles, burnGroupB, teamBAnchor.x, teamBAnchor.z, -0.2);
+  // Team 1 left side, Team 2 right side.
+  renderPile(aTiles, burnGroupA, -5.45, -2.2);
+  renderPile(bTiles, burnGroupB, 5.02, -2.2);
 }
 
 function updateHud() {
   if (!roomState) {
     hudBidValue.textContent = '-';
     hudTrumpValue.textContent = '-';
+    turnTimerHud.textContent = 'TIME: --';
     updateScoreboard();
     updateMarksMenu();
+    updateTimerControls();
     return;
   }
 
@@ -1216,6 +1331,37 @@ function updateHud() {
 
   updateScoreboard();
   updateMarksMenu();
+  updateTimerControls();
+}
+
+function updateTimerControls() {
+  const isHost = roomState?.hostClientId === localClientId;
+  const enabled = !!roomState?.turnTimerEnabled;
+  const paused = !!roomState?.turnTimerPaused;
+  timerEnabledToggle.checked = enabled;
+  timerEnabledToggle.disabled = !isHost || !roomState;
+  timerPauseBtn.disabled = !isHost || !roomState || !enabled;
+  timerPauseBtn.textContent = paused ? 'Resume Timer' : 'Pause Timer';
+
+  if (!roomState) {
+    timerStateText.textContent = 'Timer Off';
+    return;
+  }
+
+  const remaining = currentTimerRemainingMs();
+  const activeSeat = Number.isInteger(roomState.turnSeat) ? roomState.turnSeat + 1 : '-';
+  timerStateText.textContent = enabled
+    ? `${paused ? 'Paused' : 'Running'} | Seat ${activeSeat} | ${formatTimerMs(remaining)}`
+    : 'Timer Off';
+}
+
+function updateTimerHud() {
+  if (!roomState?.turnTimerEnabled) {
+    turnTimerHud.textContent = 'TIME: --';
+    return;
+  }
+  const remaining = currentTimerRemainingMs();
+  turnTimerHud.textContent = `TIME: ${formatTimerMs(remaining)}`;
 }
 
 function updateNameplates() {
@@ -1224,6 +1370,8 @@ function updateNameplates() {
   const maxMarks = Math.max(marks.teamA || 0, marks.teamB || 0);
   const tied = (marks.teamA || 0) === (marks.teamB || 0);
   const crownTeam = maxMarks > 0 && !tied ? (marks.teamA > marks.teamB ? 'teamA' : 'teamB') : null;
+  const localSeat = getLocalSeat();
+  const timerRemainingMs = currentTimerRemainingMs();
 
   for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
     const node = document.getElementById(`nameplate-${seatIndex}`);
@@ -1242,13 +1390,22 @@ function updateNameplates() {
         : 'OPEN';
 
     const crown = crownTeam && teamForSeat(seatIndex) === crownTeam ? ' 👑' : '';
-    const bidText = roomState?.phase === PHASES.BIDDING ? ` | Bid: ${seatBids[seatIndex] || 'PASS'}` : '';
+    const bidValue = roomState?.phase === PHASES.BIDDING
+      ? (seatIndex === localSeat && pendingLocalBidChoice != null ? pendingLocalBidChoice : (seatBids[seatIndex] || 'PASS'))
+      : null;
+    const bidText = bidValue != null ? ` | Bid: ${bidValue}` : '';
+    const teamTag = teamForSeat(seatIndex) === 'teamA' ? 'Team 1' : 'Team 2';
+    const timerText = active && roomState?.turnTimerEnabled && timerRemainingMs != null ? ` | TIME ${formatTimerMs(timerRemainingMs)}` : '';
+    const canEditName = localSeat === seatIndex && seat.type === 'human';
+    const nameSafe = String(seat.name || `Seat ${seatIndex + 1}`).replace(/"/g, '&quot;');
 
-    ensureNameplateTemplate(node, seatIndex);
-    const seatNameEl = node.querySelector('.seatName');
-    const seatMetaEl = node.querySelector('.seatMeta');
-    if (seatNameEl) seatNameEl.textContent = `${seat.name}${crown}`;
-    if (seatMetaEl) seatMetaEl.textContent = `${role}${bidText}`;
+    node.innerHTML = `
+      <div class="dragHandle" data-drag-seat="${seatIndex}" title="Drag">MOVE</div>
+      <div class="teamTag">${teamTag}</div>
+      <div class="seatName">${seat.name || `Seat ${seatIndex + 1}`}${crown}</div>
+      <div class="seatMeta">${role}${bidText}${timerText}</div>
+      ${canEditName ? `<input class="nameInput" data-seat-name="${seatIndex}" maxlength="24" value="${nameSafe}" />` : ''}
+    `;
 
     node.classList.toggle('active', active);
   }
@@ -1319,6 +1476,8 @@ function renderSeatControls() {
     const typeClass = seat.type === 'cpu' ? 'cpu' : 'human';
     const occupiedByMe = seat.occupantClientId === localClientId;
     const canAvatarEdit = seat.type === 'human' ? occupiedByMe : isHost;
+    const canNameEdit = seat.type === 'human' ? occupiedByMe : isHost;
+    const currentName = (seat.name || `Seat ${seat.seatIndex + 1}`).slice(0, 24);
 
     card.innerHTML = `
       <div class="seatTop">
@@ -1352,6 +1511,11 @@ function renderSeatControls() {
           ${avatarCatalog.map((entry) => `<option value="${entry.id}" ${entry.id === seat.avatarId ? 'selected' : ''}>${entry.name}</option>`).join('')}
         </select>
       </div>
+      <div class="controlRow">
+        <label>Name</label>
+        <input data-action="nameInput" data-seat="${seat.seatIndex}" maxlength="24" value="${currentName.replace(/"/g, '&quot;')}" ${canNameEdit ? '' : 'disabled'} />
+        <button data-action="nameSave" data-seat="${seat.seatIndex}" ${canNameEdit ? '' : 'disabled'}>Save Name</button>
+      </div>
       <div class="smallText">${seat.occupantClientId ? `Client ${seat.occupantClientId}` : (seat.type === 'cpu' ? 'CPU seat' : 'Unclaimed')}</div>
     `;
 
@@ -1364,7 +1528,7 @@ function renderSeatControls() {
 
     if (action === 'claim') {
       el.addEventListener('click', () => {
-        sendAction('claimSeat', { seatIndex, name: `Player ${seatIndex + 1}` });
+        sendAction('claimSeat', { seatIndex, name: getStoredPlayerName() });
       });
     }
 
@@ -1381,7 +1545,7 @@ function renderSeatControls() {
           type: el.value,
           cpuLevel: roomState.seats[seatIndex].cpuLevel,
           claimForSelf: el.value === 'human',
-          name: `Player ${seatIndex + 1}`
+          name: getStoredPlayerName()
         });
       });
     }
@@ -1404,6 +1568,20 @@ function renderSeatControls() {
         });
       });
     }
+
+    if (action === 'nameSave') {
+      el.addEventListener('click', () => {
+        const input = seatControls.querySelector(`input[data-action="nameInput"][data-seat="${seatIndex}"]`);
+        if (!input) return;
+        const name = String(input.value || '').trim().slice(0, 24);
+        if (!name) return;
+        sendAction('setSeatName', { seatIndex, name });
+        const seat = roomState?.seats?.[seatIndex];
+        if (seat?.occupantClientId === localClientId && seat.type === 'human') {
+          localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name);
+        }
+      });
+    }
   });
 
   if (localSeat != null) {
@@ -1424,9 +1602,11 @@ function getCurrentHighBid() {
 function updateBidControls() {
   bidButtonsWrap.innerHTML = '';
   const passBtn = document.getElementById('passBidBtn');
+  pendingLocalBidChoice = null;
 
   if (!roomState || roomState.phase !== PHASES.BIDDING) {
     passBtn.disabled = true;
+    updateNameplates();
     return;
   }
 
@@ -1438,7 +1618,20 @@ function updateBidControls() {
     const btn = document.createElement('button');
     btn.textContent = String(bid);
     btn.disabled = !canBid || bid <= highBid;
+    btn.addEventListener('mouseenter', () => {
+      if (!btn.disabled) {
+        pendingLocalBidChoice = bid;
+        updateNameplates();
+      }
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (pendingLocalBidChoice === bid) {
+        pendingLocalBidChoice = null;
+        updateNameplates();
+      }
+    });
     btn.addEventListener('click', () => {
+      pendingLocalBidChoice = null;
       sendAction('submitBid', { bid });
       forceClosePanel = true;
       updatePanelAutoBehavior();
@@ -1447,6 +1640,8 @@ function updateBidControls() {
   }
 
   passBtn.onclick = () => {
+    pendingLocalBidChoice = 'PASS';
+    updateNameplates();
     sendAction('submitBid', { bid: null });
     forceClosePanel = true;
     updatePanelAutoBehavior();
@@ -1508,6 +1703,28 @@ function applyStoredAvatarIfNeeded() {
   storedAvatarAppliedSeat = localSeat;
 }
 
+function applyStoredNameIfNeeded() {
+  if (!roomState || !localClientId) return;
+  const localSeat = getLocalSeat();
+  if (localSeat == null) return;
+  if (storedNameAppliedSeat === localSeat) return;
+
+  const desired = getStoredPlayerName();
+  if (!desired) {
+    storedNameAppliedSeat = localSeat;
+    return;
+  }
+
+  const current = String(roomState.seats[localSeat]?.name || '').trim();
+  if (current === desired) {
+    storedNameAppliedSeat = localSeat;
+    return;
+  }
+
+  sendAction('setSeatName', { seatIndex: localSeat, name: desired });
+  storedNameAppliedSeat = localSeat;
+}
+
 function applySnapshot(room) {
   const prevLocalSeat = lastLocalSeat;
   roomState = room;
@@ -1516,10 +1733,19 @@ function applySnapshot(room) {
   lastLocalSeat = newLocalSeat;
   if (prevLocalSeat !== newLocalSeat) {
     storedAvatarAppliedSeat = null;
+    storedNameAppliedSeat = null;
     updateSeatTransforms();
   }
 
+  if (selectedDominoTileId && newLocalSeat != null) {
+    const myHand = roomState.hands?.[newLocalSeat] || [];
+    if (!myHand.some((tile) => tile.id === selectedDominoTileId)) {
+      selectedDominoTileId = null;
+    }
+  }
+
   applyStoredAvatarIfNeeded();
+  applyStoredNameIfNeeded();
   updatePanelAutoBehavior();
   showSections();
   updateHud();
@@ -1584,9 +1810,30 @@ function connect() {
       if (!roomState || !Number.isInteger(data.seatIndex)) return;
       const seat = roomState.seats?.[data.seatIndex];
       if (!seat) return;
-      seat.avatarId = data.avatarId;
+      if (data.avatarId != null) seat.avatarId = data.avatarId;
+      if (typeof data.name === 'string') seat.name = data.name;
       renderAvatars();
+      updateNameplates();
       renderSeatControls();
+      return;
+    }
+
+    if (data.type === 'game:timerUpdate') {
+      if (!roomState) return;
+      roomState.turnTimerEnabled = !!data.turnTimerEnabled;
+      roomState.turnTimerPaused = !!data.turnTimerPaused;
+      roomState.turnTimeLimitMs = Number(data.turnTimeLimitMs || 60000);
+      roomState.turnDeadlineTs = data.turnDeadlineTs == null ? null : Number(data.turnDeadlineTs);
+      roomState.turnRemainingMs = Number(data.remainingMs ?? roomState.turnRemainingMs ?? roomState.turnTimeLimitMs);
+      roomState.activeTurnId = Number(data.activeTurnId ?? roomState.activeTurnId ?? 0);
+      updateTimerControls();
+      return;
+    }
+
+    if (data.type === 'game:autoMove') {
+      if (Number.isInteger(data.seat)) {
+        logMessage(`Seat ${Number(data.seat) + 1} auto-played on timeout.`);
+      }
       return;
     }
 
@@ -1658,6 +1905,15 @@ function ensureButtons() {
     sendAction('restartGame');
   });
 
+  timerEnabledToggle.addEventListener('change', () => {
+    sendAction('host:timerEnable', { enabled: !!timerEnabledToggle.checked });
+  });
+
+  timerPauseBtn.addEventListener('click', () => {
+    if (!roomState) return;
+    sendAction('host:timerPause', { paused: !roomState.turnTimerPaused });
+  });
+
   panelToggle.addEventListener('click', () => {
     setPanelOpen(!panelOpen);
   });
@@ -1681,6 +1937,27 @@ function ensureButtons() {
     if (!Number.isInteger(seatIndex)) return;
     beginNameplateDrag(seatIndex, event.pointerId, event.clientX, event.clientY);
     event.preventDefault();
+  });
+
+  nameplatesWrap.addEventListener('change', (event) => {
+    const input = event.target.closest('.nameInput');
+    if (!input) return;
+    const seatIndex = Number(input.dataset.seatName);
+    if (!Number.isInteger(seatIndex)) return;
+    const name = String(input.value || '').trim().slice(0, 24);
+    if (!name) return;
+    sendAction('setSeatName', { seatIndex, name });
+    if (roomState?.seats?.[seatIndex]?.occupantClientId === localClientId) {
+      localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name);
+    }
+  });
+
+  nameplatesWrap.addEventListener('keydown', (event) => {
+    const input = event.target.closest('.nameInput');
+    if (!input) return;
+    if (event.key === 'Enter') {
+      input.blur();
+    }
   });
 
   window.addEventListener('pointermove', (event) => {
@@ -1711,11 +1988,55 @@ function ensureButtons() {
 }
 
 function addPointerInteraction() {
+  const applyVisualState = (mesh, { hovered, selected }) => {
+    if (!mesh?.isMesh) return;
+    const targetY = DOMINO_Y + (selected ? 0.1 : hovered ? 0.045 : 0);
+    mesh.position.y = targetY;
+    const topMat = Array.isArray(mesh.material) ? mesh.material[2] : null;
+    if (topMat?.emissive) {
+      if (selected) {
+        topMat.emissive.setHex(0x5a4b1f);
+        topMat.emissiveIntensity = 0.75;
+      } else if (hovered) {
+        topMat.emissive.setHex(0x2a2412);
+        topMat.emissiveIntensity = 0.45;
+      } else {
+        topMat.emissive.setHex(0x000000);
+        topMat.emissiveIntensity = 0;
+      }
+    }
+  };
+
+  const refreshHandVisuals = () => {
+    handGroup.traverse((obj) => {
+      if (!obj.isMesh || !obj.userData?.clickable) return;
+      const hovered = obj === hoveredDominoMesh;
+      const selected = selectedDominoTileId && obj.userData?.tileId === selectedDominoTileId;
+      applyVisualState(obj, { hovered, selected });
+    });
+  };
+
+  canvas.addEventListener('pointermove', (event) => {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const intersects = raycaster.intersectObjects(handGroup.children, true);
+    const hit = intersects.find((entry) => entry.object?.userData?.clickable);
+    hoveredDominoMesh = hit?.object || null;
+    refreshHandVisuals();
+  });
+
+  canvas.addEventListener('pointerleave', () => {
+    hoveredDominoMesh = null;
+    refreshHandVisuals();
+  });
+
   canvas.addEventListener('pointerdown', (event) => {
-    if (!roomState || !isMyTurnToPlay()) return;
+    if (!roomState) return;
 
     const localSeat = getLocalSeat();
-    if (localSeat == null || roomState.turnSeat !== localSeat) return;
+    if (localSeat == null) return;
 
     const rect = canvas.getBoundingClientRect();
     pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1728,8 +2049,19 @@ function addPointerInteraction() {
 
     const pickedId = selected.object.userData.tileId;
     if (!pickedId) return;
+    selectedDominoTileId = pickedId;
+    refreshHandVisuals();
+
+    if (!isMyTurnToPlay() || roomState.turnSeat !== localSeat) {
+      logMessage('Not your turn yet.');
+      return;
+    }
+
+    event.preventDefault();
     sendAction('playTile', { tileId: pickedId });
   });
+
+  handGroup.userData.refreshSelection = refreshHandVisuals;
 }
 
 function onResize() {
@@ -1740,11 +2072,9 @@ function onResize() {
 
 function animate() {
   requestAnimationFrame(animate);
-  const dt = clock.getDelta();
-  for (const mixer of seatMixers.values()) {
-    mixer.update(dt);
-  }
+  clock.getDelta();
   updateNameplatePositions();
+  updateTimerHud();
   renderer.render(scene, camera);
 }
 
@@ -1806,6 +2136,8 @@ addPointerInteraction();
 showSections();
 setPanelOpen(true);
 updateScoreboard();
+updateTimerControls();
+updateTimerHud();
 connect();
 
 Promise.all([loadAvatarManifest(), loadEnvironmentModels()])

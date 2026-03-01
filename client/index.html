@@ -39,6 +39,8 @@
           </div>
         </div>
 
+        <div id="turnTimerHud">TIME: --</div>
+
         <div id="nameplates">
           <div class="nameplate" id="nameplate-0" data-seat="0"></div>
           <div class="nameplate" id="nameplate-1" data-seat="1"></div>
@@ -83,6 +85,16 @@
             <button id="startGameBtn">Start Game</button>
             <button id="restartGameBtn">Restart Game</button>
           </div>
+          <div class="controlRow">
+            <label>
+              <input id="timerEnabledToggle" type="checkbox" />
+              Enable Turn Timer
+            </label>
+          </div>
+          <div class="buttonRow">
+            <button id="timerPauseBtn">Pause Timer</button>
+          </div>
+          <div id="timerStateText" class="smallText">Timer Off</div>
         </section>
 
         <section id="section-bidding" class="panelSection">

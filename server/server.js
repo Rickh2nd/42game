@@ -10,6 +10,7 @@ import {
   PHASES,
   activeSeatsForMode,
   buildShuffledDeck,
+  countTilePoints,
   computeChampsTeam,
   computeLegalBids,
   computeLegalPlays,
@@ -26,6 +27,7 @@ import {
   otherTeam,
   resolveTrick,
   sevensRoundResult,
+  tileContainsSuit,
   updateRoundWinsAndMarks
 } from '../shared/fortyTwo.js';
 
@@ -66,6 +68,8 @@ let clientCounter = 1;
 const PORT = Number(process.env.PORT || 8080);
 const avatarManifestIds = loadAvatarManifestIds();
 const defaultAvatarId = avatarManifestIds.values().next().value || null;
+const TURN_TIMER_DEFAULT_MS = 60000;
+const TURN_TIMER_TICK_MS = 500;
 
 function loadAvatarManifestIds() {
   try {
@@ -146,7 +150,13 @@ function createRoom(roomId, hostClientId) {
     lastHandOutcome: null,
     pendingCpuTimer: null,
     trickPauseTimer: null,
-    handOverTimer: null
+    handOverTimer: null,
+    turnTimerEnabled: false,
+    turnTimerPaused: false,
+    turnTimeLimitMs: TURN_TIMER_DEFAULT_MS,
+    turnDeadlineTs: null,
+    turnRemainingMs: TURN_TIMER_DEFAULT_MS,
+    activeTurnId: 0
   };
 }
 
@@ -174,6 +184,12 @@ function humanSeatForClient(room, clientId) {
 }
 
 function roomPublicSnapshot(room, viewerClientId) {
+  const limitMs = Math.max(1000, Number(room.turnTimeLimitMs || TURN_TIMER_DEFAULT_MS));
+  let remainingMs = Math.max(0, Number(room.turnRemainingMs ?? limitMs));
+  if (room.turnTimerEnabled && !room.turnTimerPaused && Number.isFinite(room.turnDeadlineTs)) {
+    remainingMs = Math.max(0, Number(room.turnDeadlineTs) - Date.now());
+  }
+
   const handCounts = {
     0: room.hands[0]?.length || 0,
     1: room.hands[1]?.length || 0,
@@ -227,7 +243,13 @@ function roomPublicSnapshot(room, viewerClientId) {
     contract: room.contract ? { ...room.contract } : null,
     activeSeats: [...room.activeSeats],
     handNumber: room.handNumber,
-    lastHandOutcome: room.lastHandOutcome ? { ...room.lastHandOutcome } : null
+    lastHandOutcome: room.lastHandOutcome ? { ...room.lastHandOutcome } : null,
+    turnTimerEnabled: !!room.turnTimerEnabled,
+    turnTimerPaused: !!room.turnTimerPaused,
+    turnTimeLimitMs: limitMs,
+    turnDeadlineTs: room.turnDeadlineTs == null ? null : Number(room.turnDeadlineTs),
+    turnRemainingMs: remainingMs,
+    activeTurnId: Number(room.activeTurnId || 0)
   };
 }
 
@@ -248,6 +270,161 @@ function broadcastRoomEvent(room, payload) {
     if (!client) continue;
     send(client.ws, payload);
   }
+}
+
+function timerEventPayload(room) {
+  const limitMs = Math.max(1000, Number(room.turnTimeLimitMs || TURN_TIMER_DEFAULT_MS));
+  let remainingMs = Math.max(0, Number(room.turnRemainingMs ?? limitMs));
+  if (room.turnTimerEnabled && !room.turnTimerPaused && Number.isFinite(room.turnDeadlineTs)) {
+    remainingMs = Math.max(0, Number(room.turnDeadlineTs) - Date.now());
+  }
+  return {
+    type: 'game:timerUpdate',
+    turnTimerEnabled: !!room.turnTimerEnabled,
+    turnTimerPaused: !!room.turnTimerPaused,
+    turnTimeLimitMs: limitMs,
+    turnDeadlineTs: room.turnDeadlineTs == null ? null : Number(room.turnDeadlineTs),
+    remainingMs,
+    activePlayerSeat: Number.isInteger(room.turnSeat) ? room.turnSeat : null,
+    activeTurnId: Number(room.activeTurnId || 0)
+  };
+}
+
+function broadcastTurnTimer(room) {
+  broadcastRoomEvent(room, timerEventPayload(room));
+}
+
+function phaseUsesTurnTimer(room) {
+  return room.phase === PHASES.PLAYING && Number.isInteger(room.turnSeat);
+}
+
+function clearTurnTimer(room, { resetRemaining = true, clearPaused = false } = {}) {
+  room.turnDeadlineTs = null;
+  if (resetRemaining) {
+    room.turnRemainingMs = Math.max(1000, Number(room.turnTimeLimitMs || TURN_TIMER_DEFAULT_MS));
+  }
+  if (clearPaused) {
+    room.turnTimerPaused = false;
+  }
+}
+
+function startTurnTimer(room, { useStoredRemaining = false } = {}) {
+  if (!room.turnTimerEnabled || room.turnTimerPaused || !phaseUsesTurnTimer(room)) {
+    room.turnDeadlineTs = null;
+    return;
+  }
+
+  const limitMs = Math.max(1000, Number(room.turnTimeLimitMs || TURN_TIMER_DEFAULT_MS));
+  let remaining = limitMs;
+  if (useStoredRemaining) {
+    remaining = Math.max(1, Math.min(limitMs, Number(room.turnRemainingMs || limitMs)));
+  }
+
+  room.turnRemainingMs = remaining;
+  room.turnDeadlineTs = Date.now() + remaining;
+  room.activeTurnId = Number(room.activeTurnId || 0) + 1;
+}
+
+function syncTurnTimerForState(room, { newTurn = false } = {}) {
+  if (!room.turnTimerEnabled) {
+    clearTurnTimer(room, { resetRemaining: true, clearPaused: true });
+    return;
+  }
+  if (!phaseUsesTurnTimer(room)) {
+    clearTurnTimer(room, { resetRemaining: true });
+    return;
+  }
+  if (room.turnTimerPaused) {
+    room.turnDeadlineTs = null;
+    const limitMs = Math.max(1000, Number(room.turnTimeLimitMs || TURN_TIMER_DEFAULT_MS));
+    if (newTurn) {
+      room.turnRemainingMs = limitMs;
+    } else if (!Number.isFinite(room.turnRemainingMs)) {
+      room.turnRemainingMs = limitMs;
+    }
+    return;
+  }
+  if (newTurn || room.turnDeadlineTs == null) {
+    startTurnTimer(room, { useStoredRemaining: false });
+  }
+}
+
+function estimateWinsTrick(room, seatIndex, tile) {
+  if (room.mode === MODES.SEVENS) {
+    if (seatIndex !== room.bidderSeat) return false;
+    const legal = computeLegalPlays(room, seatIndex);
+    if (!legal.length) return false;
+    const best = [...legal].sort((a, b) => {
+      const da = Math.abs((a.a + a.b) - 7);
+      const db = Math.abs((b.a + b.b) - 7);
+      return da - db || (a.a + a.b) - (b.a + b.b) || String(a.id).localeCompare(String(b.id));
+    })[0];
+    return best?.id === tile.id;
+  }
+
+  const simulatedTrick = [...(room.trick || []), { seatIndex, tile }];
+  const result = resolveTrick(
+    {
+      mode: room.mode,
+      trumpSuit: room.trumpSuit,
+      bidderSeat: room.bidderSeat
+    },
+    simulatedTrick
+  );
+
+  if (simulatedTrick.length >= room.activeSeats.length) {
+    return getTeam(result.winnerSeat) === getTeam(seatIndex);
+  }
+  return result.winnerSeat === seatIndex;
+}
+
+function computeWorstPlayScore(room, seatIndex, tile) {
+  const winsTrickEstimate = estimateWinsTrick(room, seatIndex, tile);
+  const isCountTile = countTilePoints(tile) > 0;
+  const pipSum = tile.a + tile.b;
+  const pipSumNormalized = pipSum / 12;
+  const isTrumpSide = room.mode === MODES.TRUMPS && Number.isInteger(room.trumpSuit) && tileContainsSuit(tile, room.trumpSuit);
+  const trumpRank = !isTrumpSide
+    ? -1
+    : tile.a === tile.b
+      ? 6
+      : (tile.a === room.trumpSuit ? tile.b : tile.a);
+  const trumpRankHigh = isTrumpSide && trumpRank >= 4;
+
+  let playerBenefit = (winsTrickEstimate ? 10 : 0);
+  playerBenefit -= isCountTile ? 8 : 0;
+  playerBenefit -= trumpRankHigh ? 4 : 0;
+  playerBenefit -= pipSumNormalized;
+
+  // Make giveaway-count behavior slightly worse for deterministic timeout punishments.
+  if (isCountTile && !winsTrickEstimate) {
+    playerBenefit -= 2;
+  }
+
+  return {
+    playerBenefit,
+    giveawayPriority: isCountTile && !winsTrickEstimate ? 2 : isCountTile ? 1 : 0,
+    pipSum
+  };
+}
+
+function chooseWorstLegalPlay(room, seatIndex) {
+  const legal = computeLegalPlays(room, seatIndex);
+  if (!legal.length) return null;
+
+  const scored = legal.map((tile) => ({
+    tile,
+    ...computeWorstPlayScore(room, seatIndex, tile)
+  }));
+
+  scored.sort((a, b) => {
+    if (a.playerBenefit !== b.playerBenefit) return a.playerBenefit - b.playerBenefit;
+    if (a.giveawayPriority !== b.giveawayPriority) return b.giveawayPriority - a.giveawayPriority;
+    if (a.pipSum !== b.pipSum) return a.pipSum - b.pipSum;
+    return String(a.tile.id).localeCompare(String(b.tile.id));
+  });
+
+  return scored[0].tile;
 }
 
 function clearRoomTimers(room) {
@@ -375,6 +552,7 @@ function startNewHand(room, { resetMarks = false } = {}) {
   room.bidTurnIndex = 0;
   room.turnSeat = room.biddingOrder[0];
   room.handNumber += 1;
+  syncTurnTimerForState(room, { newTurn: true });
 }
 
 function finalizeBidding(room) {
@@ -445,6 +623,7 @@ function enterPlayingPhase(room) {
     trumpSuit: room.trumpSuit ?? null
   };
   room.targetThisHand = computeTargetThisHand(room.bidderSeat, room.bidValue);
+  syncTurnTimerForState(room, { newTurn: true });
 }
 
 function finishHand(room) {
@@ -459,6 +638,7 @@ function finishHand(room) {
     at: Date.now()
   };
   room.phase = PHASES.HAND_OVER;
+  syncTurnTimerForState(room, { newTurn: true });
 
   room.handOverTimer = setTimeout(() => {
     room.handOverTimer = null;
@@ -471,6 +651,7 @@ function finishHand(room) {
 
 function enterTrickPause(room, handDone) {
   room.phase = PHASES.TRICK_PAUSE;
+  syncTurnTimerForState(room, { newTurn: true });
   room.trickPauseTimer = setTimeout(() => {
     room.trickPauseTimer = null;
 
@@ -485,8 +666,10 @@ function enterTrickPause(room, handDone) {
     if (room.mode === MODES.SEVENS) {
       room.turnSeat = room.bidderSeat;
     }
+    syncTurnTimerForState(room, { newTurn: true });
 
     broadcastRoom(room);
+    broadcastTurnTimer(room);
     scheduleCpuIfNeeded(room);
   }, 2200);
 }
@@ -674,7 +857,7 @@ function removeClientFromRoom(clientId, reason = 'left') {
 }
 
 function handleRoomAction(room, clientId, action, payload, options = {}) {
-  const { internal = false, forcedSeat = null } = options;
+  const { internal = false, forcedSeat = null, expectedTurnId = null } = options;
 
   const reject = (message) => {
     if (!internal && clientId) {
@@ -823,12 +1006,104 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
     return true;
   }
 
+  if (action === 'setSeatName') {
+    const seat = seatByIndex(room, Number(payload.seatIndex));
+    if (!seat) return reject('Invalid seat index.');
+
+    const nextName = String(payload.name || '').trim().slice(0, 24);
+    if (!nextName) {
+      return reject('Name is required.');
+    }
+
+    if (seat.type === 'human') {
+      if (!internal && seat.occupantClientId !== clientId) {
+        return reject('Only the occupied human seat client can change this name.');
+      }
+    } else if (seat.type === 'cpu') {
+      if (!internal && room.hostClientId !== clientId) {
+        return reject('Only host can change CPU names.');
+      }
+    }
+
+    seat.name = nextName;
+    broadcastRoomEvent(room, {
+      type: 'player:update',
+      playerId: seat.occupantClientId || null,
+      seatIndex: seat.seatIndex,
+      name: seat.name
+    });
+    broadcastRoom(room);
+    return true;
+  }
+
+  if (action === 'host:timerEnable') {
+    if (!ensureHost(room, clientId, action)) return false;
+
+    const enabled = !!payload.enabled;
+    const limitMs = Math.max(1000, Number(room.turnTimeLimitMs || TURN_TIMER_DEFAULT_MS));
+    room.turnTimeLimitMs = limitMs;
+    room.turnTimerEnabled = enabled;
+
+    if (!enabled) {
+      clearTurnTimer(room, { resetRemaining: true, clearPaused: true });
+    } else {
+      room.turnTimerPaused = false;
+      room.turnRemainingMs = limitMs;
+      if (phaseUsesTurnTimer(room)) {
+        startTurnTimer(room, { useStoredRemaining: false });
+      } else {
+        room.turnDeadlineTs = null;
+      }
+    }
+
+    broadcastRoom(room);
+    broadcastTurnTimer(room);
+    return true;
+  }
+
+  if (action === 'host:timerPause') {
+    if (!ensureHost(room, clientId, action)) return false;
+    if (!room.turnTimerEnabled) {
+      return reject('Turn timer is disabled.');
+    }
+
+    const paused = !!payload.paused;
+    const limitMs = Math.max(1000, Number(room.turnTimeLimitMs || TURN_TIMER_DEFAULT_MS));
+    room.turnTimeLimitMs = limitMs;
+
+    if (paused) {
+      if (!room.turnTimerPaused) {
+        const remaining = room.turnDeadlineTs == null
+          ? Math.max(0, Number(room.turnRemainingMs || limitMs))
+          : Math.max(0, Number(room.turnDeadlineTs) - Date.now());
+        room.turnRemainingMs = remaining;
+      }
+      room.turnTimerPaused = true;
+      room.turnDeadlineTs = null;
+    } else {
+      room.turnTimerPaused = false;
+      if (phaseUsesTurnTimer(room)) {
+        const remaining = Math.max(1, Number(room.turnRemainingMs || limitMs));
+        room.turnRemainingMs = remaining;
+        room.turnDeadlineTs = Date.now() + remaining;
+      } else {
+        room.turnDeadlineTs = null;
+        room.turnRemainingMs = limitMs;
+      }
+    }
+
+    broadcastRoom(room);
+    broadcastTurnTimer(room);
+    return true;
+  }
+
   if (action === 'startGame') {
     if (!ensureHost(room, clientId, action)) return false;
     if (room.phase !== PHASES.LOBBY) return reject('Game already started.');
 
     startNewHand(room, { resetMarks: true });
     broadcastRoom(room);
+    broadcastTurnTimer(room);
     scheduleCpuIfNeeded(room);
     return true;
   }
@@ -838,6 +1113,7 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
     room.dealerSeat = 0;
     startNewHand(room, { resetMarks: true });
     broadcastRoom(room);
+    broadcastTurnTimer(room);
     scheduleCpuIfNeeded(room);
     return true;
   }
@@ -867,8 +1143,10 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
     } else {
       room.turnSeat = room.biddingOrder[room.bidTurnIndex];
     }
+    syncTurnTimerForState(room, { newTurn: true });
 
     broadcastRoom(room);
+    broadcastTurnTimer(room);
     scheduleCpuIfNeeded(room);
     return true;
   }
@@ -897,12 +1175,14 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
     if (mode === MODES.TRUMPS) {
       room.phase = PHASES.CHOOSE_TRUMP;
       room.turnSeat = room.bidderSeat;
+      syncTurnTimerForState(room, { newTurn: true });
     } else {
       room.trumpSuit = null;
       enterPlayingPhase(room);
     }
 
     broadcastRoom(room);
+    broadcastTurnTimer(room);
     scheduleCpuIfNeeded(room);
     return true;
   }
@@ -929,12 +1209,16 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
 
     enterPlayingPhase(room);
     broadcastRoom(room);
+    broadcastTurnTimer(room);
     scheduleCpuIfNeeded(room);
     return true;
   }
 
   if (action === 'playTile') {
     if (room.phase !== PHASES.PLAYING) return reject('playTile is only valid during playing phase.');
+    if (expectedTurnId != null && Number(room.activeTurnId || 0) !== Number(expectedTurnId)) {
+      return reject('Stale turn action rejected.');
+    }
 
     const seatIndex = forcedSeat ?? room.turnSeat;
     if (seatIndex !== room.turnSeat) return reject('Not this seat\'s turn.');
@@ -958,13 +1242,16 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
 
     if (room.trick.length < room.activeSeats.length) {
       room.turnSeat = nextActiveSeat(room.activeSeats, seatIndex);
+      syncTurnTimerForState(room, { newTurn: true });
       broadcastRoom(room);
+      broadcastTurnTimer(room);
       scheduleCpuIfNeeded(room);
       return true;
     }
 
     completeTrick(room);
     broadcastRoom(room);
+    broadcastTurnTimer(room);
     return true;
   }
 
@@ -1078,3 +1365,48 @@ wss.on('connection', (ws) => {
 server.listen(PORT, () => {
   console.log(`Texas 42 server listening on http://localhost:${PORT}`);
 });
+
+setInterval(() => {
+  for (const room of rooms.values()) {
+    if (!room.turnTimerEnabled || room.turnTimerPaused || room.turnDeadlineTs == null) continue;
+    if (!phaseUsesTurnTimer(room)) {
+      syncTurnTimerForState(room, { newTurn: false });
+      continue;
+    }
+
+    if (Date.now() < Number(room.turnDeadlineTs)) continue;
+
+    const timeoutTurnId = Number(room.activeTurnId || 0);
+    const seatIndex = room.turnSeat;
+    if (!Number.isInteger(seatIndex)) {
+      syncTurnTimerForState(room, { newTurn: false });
+      broadcastTurnTimer(room);
+      continue;
+    }
+
+    room.turnDeadlineTs = null;
+    room.turnRemainingMs = 0;
+    const worstTile = chooseWorstLegalPlay(room, seatIndex);
+    if (!worstTile) {
+      syncTurnTimerForState(room, { newTurn: false });
+      broadcastTurnTimer(room);
+      continue;
+    }
+
+    broadcastRoomEvent(room, {
+      type: 'game:autoMove',
+      seat: seatIndex,
+      reason: 'timeout',
+      move: { tileId: worstTile.id, tile: { ...worstTile } },
+      activeTurnId: timeoutTurnId
+    });
+
+    handleRoomAction(
+      room,
+      null,
+      'playTile',
+      { tileId: worstTile.id },
+      { internal: true, forcedSeat: seatIndex, expectedTurnId: timeoutTurnId }
+    );
+  }
+}, TURN_TIMER_TICK_MS);
