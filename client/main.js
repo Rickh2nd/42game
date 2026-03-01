@@ -8,7 +8,7 @@ import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { SEATS, toRelativeSeat } from '/src/scene/seats.js';
-import { emitSafe, getSocket, isConnected, onStatusChange } from '/src/net/socket.js';
+import { emitSafe, getSocket, getSocketInfo, isConnected, probeHealth, socket } from '/src/net/socket.js';
 
 const MODES = {
   TRUMPS: 'trumps',
@@ -61,8 +61,14 @@ const environmentStateText = document.getElementById('environmentStateText');
 const emojiOverlays = document.getElementById('emojiOverlays');
 const networkStatusValue = document.getElementById('networkStatusValue');
 const networkUrlValue = document.getElementById('networkUrlValue');
+const networkPathValue = document.getElementById('networkPathValue');
+const networkSocketIdValue = document.getElementById('networkSocketIdValue');
+const networkTransportValue = document.getElementById('networkTransportValue');
 const networkLastConnectValue = document.getElementById('networkLastConnectValue');
 const networkLastDisconnectValue = document.getElementById('networkLastDisconnectValue');
+const networkLastErrorValue = document.getElementById('networkLastErrorValue');
+const networkHealthValue = document.getElementById('networkHealthValue');
+const pingServerBtn = document.getElementById('pingServerBtn');
 const reconnectNowBtn = document.getElementById('reconnectNowBtn');
 
 const sectionRoom = document.getElementById('section-room');
@@ -325,10 +331,16 @@ let selectedDominoTileId = null;
 let pendingLocalBidChoice = null;
 let socketStatus = 'connecting';
 let socketUrl = window.location.origin;
+let socketPath = '/socket.io';
+let socketId = '';
+let socketTransport = '';
+let socketLastError = '';
 let networkLastConnectAt = null;
 let networkLastDisconnectReason = '';
 let socketHandlersBound = false;
 let lastDisconnectedToastAt = 0;
+let socketInfoPollTimer = null;
+let healthPollTimer = null;
 localClientId = localStorage.getItem(PLAYER_ID_STORAGE_KEY) || null;
 
 function logMessage(text, timeoutMs = 2600) {
@@ -369,14 +381,30 @@ function updateSocketUi() {
   if (networkUrlValue) {
     networkUrlValue.textContent = socketUrl || window.location.origin;
   }
+  if (networkPathValue) {
+    networkPathValue.textContent = socketPath || '/socket.io';
+  }
+  if (networkSocketIdValue) {
+    networkSocketIdValue.textContent = socketId || '—';
+  }
+  if (networkTransportValue) {
+    networkTransportValue.textContent = socketTransport || '—';
+  }
   if (networkLastConnectValue) {
     networkLastConnectValue.textContent = formatNetworkTime(networkLastConnectAt);
   }
   if (networkLastDisconnectValue) {
     networkLastDisconnectValue.textContent = networkLastDisconnectReason || '—';
   }
+  if (networkLastErrorValue) {
+    networkLastErrorValue.textContent = socketLastError || '—';
+    networkLastErrorValue.title = socketLastError || '';
+  }
   if (reconnectNowBtn) {
     reconnectNowBtn.disabled = connected;
+  }
+  if (pingServerBtn) {
+    pingServerBtn.disabled = !connected;
   }
 
   const connectionOnlyControls = [
@@ -392,6 +420,70 @@ function updateSocketUi() {
     if (!node) continue;
     node.disabled = !connected;
   }
+}
+
+async function runNetworkHealthProbe() {
+  const result = await probeHealth(3500);
+  if (!networkHealthValue) return;
+  if (result.ok) {
+    networkHealthValue.textContent = `ok (${result.status})`;
+    networkHealthValue.classList.remove('fail');
+    networkHealthValue.classList.add('ok');
+  } else {
+    networkHealthValue.textContent = `unreachable (${result.status || 'ERR'})`;
+    networkHealthValue.classList.remove('ok');
+    networkHealthValue.classList.add('fail');
+  }
+  networkHealthValue.title = result.url || '';
+}
+
+function syncSocketInfoFromSingleton() {
+  const info = getSocketInfo();
+  socketStatus = info.status || (info.connected ? 'connected' : 'disconnected');
+  socketUrl = info.url || window.location.origin;
+  socketPath = info.path || '/socket.io';
+  socketId = info.id || '';
+  socketTransport = info.transport || '';
+  socketLastError = info.lastError || '';
+  updateSocketUi();
+}
+
+function startSocketInfoPolling() {
+  if (socketInfoPollTimer) {
+    clearInterval(socketInfoPollTimer);
+  }
+  syncSocketInfoFromSingleton();
+  socketInfoPollTimer = setInterval(() => {
+    syncSocketInfoFromSingleton();
+  }, 350);
+
+  if (healthPollTimer) {
+    clearInterval(healthPollTimer);
+  }
+  runNetworkHealthProbe();
+  healthPollTimer = setInterval(runNetworkHealthProbe, 10000);
+}
+
+function emitWithAckTimeout(event, payload, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({ ok: false, message: 'Request timed out.' });
+    }, timeoutMs);
+
+    socket.emit(event, payload, (ack) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (ack && typeof ack === 'object') {
+        resolve(ack);
+      } else {
+        resolve({ ok: false, message: 'Invalid server ack.' });
+      }
+    });
+  });
 }
 
 function warnOnce(key, text) {
@@ -2912,36 +3004,25 @@ function sendAction(action, payload = {}) {
 }
 
 function connect() {
-  const socket = getSocket();
+  const socketRef = getSocket();
   if (socketHandlersBound) {
     return;
   }
   socketHandlersBound = true;
+  startSocketInfoPolling();
 
-  onStatusChange((network) => {
-    socketStatus = network.status || 'disconnected';
-    socketUrl = network.socketUrl || window.location.origin;
-    if (network.status === 'disconnected' && network.lastError) {
-      networkLastDisconnectReason = String(network.lastError);
-    }
-    updateSocketUi();
-    updateTimerControls();
-    updateEnvironmentControls();
-    updateBidControls();
-    updateTrumpControls();
-    renderSeatControls();
-  });
-
-  socket.on('connect', () => {
+  socketRef.on('connect', () => {
     networkLastConnectAt = Date.now();
     networkLastDisconnectReason = '';
+    syncSocketInfoFromSingleton();
     updateSocketUi();
     sendClientHello();
     logMessage('Connected', 1300);
   });
 
-  socket.on('disconnect', (reason) => {
+  socketRef.on('disconnect', (reason) => {
     networkLastDisconnectReason = String(reason || 'disconnect');
+    syncSocketInfoFromSingleton();
     updateSocketUi();
     updateTimerControls();
     updateEnvironmentControls();
@@ -2951,11 +3032,18 @@ function connect() {
     logMessage('Disconnected from server.', 2000);
   });
 
-  socket.on('packet', (payload) => {
+  socketRef.on('connect_error', (error) => {
+    socketLastError = String(error?.message || 'connect_error');
+    syncSocketInfoFromSingleton();
+    updateSocketUi();
+    logMessage(`Socket error: ${socketLastError}`, 2200);
+  });
+
+  socketRef.on('packet', (payload) => {
     handleServerPacket(payload);
   });
 
-  socket.on('game:state', (payload) => {
+  socketRef.on('game:state', (payload) => {
     const fullState = payload?.fullState || null;
     if (!fullState) {
       resetRoomLocally();
@@ -2964,7 +3052,7 @@ function connect() {
     applySnapshot(fullState);
   });
 
-  socket.on('player:identity', (payload) => {
+  socketRef.on('player:identity', (payload) => {
     if (!payload || typeof payload !== 'object') return;
     if (payload.playerId) {
       localClientId = String(payload.playerId);
@@ -2974,10 +3062,13 @@ function connect() {
     updateNameplates();
   });
 
-  if (socket.connected) {
+  if (socketRef.connected) {
     networkLastConnectAt = Date.now();
+    syncSocketInfoFromSingleton();
     updateSocketUi();
     sendClientHello();
+  } else {
+    socketRef.connect();
   }
 }
 
@@ -3000,8 +3091,20 @@ function initHdrEnvironment() {
 }
 
 function ensureButtons() {
-  document.getElementById('createRoomBtn').addEventListener('click', () => {
-    sendAction('createRoom', { roomId: roomIdInput.value.trim() || undefined });
+  document.getElementById('createRoomBtn').addEventListener('click', async () => {
+    if (!socket.connected) {
+      logMessage('Not connected to server.', 1800);
+      return;
+    }
+    const roomId = roomIdInput.value.trim() || undefined;
+    const ack = await emitWithAckTimeout('room:create', { roomId }, 3000);
+    if (!ack?.ok) {
+      logMessage(ack?.message || 'Create room failed.', 2500);
+      return;
+    }
+    if (ack.roomId) {
+      roomIdInput.value = String(ack.roomId);
+    }
   });
 
   document.getElementById('joinRoomBtn').addEventListener('click', () => {
@@ -3050,7 +3153,22 @@ function ensureButtons() {
   });
 
   reconnectNowBtn?.addEventListener('click', () => {
-    getSocket().connect();
+    socket.disconnect();
+    socket.connect();
+  });
+
+  pingServerBtn?.addEventListener('click', () => {
+    if (!socket.connected) {
+      logMessage('Not connected to server.', 1600);
+      return;
+    }
+    socket.timeout(3000).emit('debug:ping', { t: Date.now() }, (err, ack) => {
+      if (err) {
+        logMessage('Ping timeout.', 1800);
+        return;
+      }
+      logMessage(`Ping ok ${ack?.serverTime ? new Date(ack.serverTime).toLocaleTimeString() : ''}`, 1800);
+    });
   });
 
   panelToggle.addEventListener('click', () => {

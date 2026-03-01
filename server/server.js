@@ -1428,25 +1428,10 @@ function handleAction(clientId, action, payload) {
   if (!client) return;
 
   if (action === 'createRoom') {
-    if (client.roomId) {
-      removeClientFromRoom(clientId, 'switch-room');
+    const result = createRoomForClient(clientId, payload);
+    if (!result.ok) {
+      sendError(clientId, action, result.message || 'Unable to create room.');
     }
-
-    const roomId = normalizeRoomId(payload?.roomId);
-    if (rooms.has(roomId)) {
-      sendError(clientId, action, 'Room already exists.');
-      return;
-    }
-
-    const room = createRoom(roomId, clientId);
-    rooms.set(roomId, room);
-    client.roomId = roomId;
-
-    send(client.socket, {
-      type: 'roomCreated',
-      roomId
-    });
-    broadcastRoom(room);
     return;
   }
 
@@ -1487,6 +1472,33 @@ function handleAction(clientId, action, payload) {
   }
 
   handleRoomAction(room, clientId, action, payload || {});
+}
+
+function createRoomForClient(clientId, payload) {
+  const client = clients.get(clientId);
+  if (!client) {
+    return { ok: false, message: 'Client not found.' };
+  }
+
+  if (client.roomId) {
+    removeClientFromRoom(clientId, 'switch-room');
+  }
+
+  const roomId = normalizeRoomId(payload?.roomId);
+  if (rooms.has(roomId)) {
+    return { ok: false, message: 'Room already exists.' };
+  }
+
+  const room = createRoom(roomId, clientId);
+  rooms.set(roomId, room);
+  client.roomId = roomId;
+
+  send(client.socket, {
+    type: 'roomCreated',
+    roomId
+  });
+  broadcastRoom(room);
+  return { ok: true, roomId };
 }
 
 function attachSocketToClient(socket, preferredClientId = null) {
@@ -1589,6 +1601,20 @@ io.on('connection', (socket) => {
       return;
     }
     handleAction(resolvedClientId, action, data.payload || {});
+  });
+
+  socket.on('room:create', (payload, ack) => {
+    const resolvedClientId = socketToClientId.get(socket.id);
+    if (!resolvedClientId) {
+      if (typeof ack === 'function') {
+        ack({ ok: false, message: 'Client not mapped.' });
+      }
+      return;
+    }
+    const result = createRoomForClient(resolvedClientId, payload || {});
+    if (typeof ack === 'function') {
+      ack(result);
+    }
   });
 
   socket.on('debug:ping', (payload, ack) => {
