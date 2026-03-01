@@ -549,22 +549,6 @@ body,
   color: #dbe7f7;
 }
 
-#networkLastErrorValue {
-  max-width: 170px;
-  text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#networkHealthValue.ok {
-  color: #8de7ad;
-}
-
-#networkHealthValue.fail {
-  color: #ff9c9c;
-}
-
 .modal {
   position: fixed;
   inset: 0;

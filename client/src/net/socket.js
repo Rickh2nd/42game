@@ -5,9 +5,7 @@ const STATUS_CONNECTED = 'connected';
 const STATUS_DISCONNECTED = 'disconnected';
 
 const statusListeners = new Set();
-
 const SOCKET_URL = resolveSocketUrl();
-const SOCKET_PATH = resolveSocketPath();
 
 let socketInstance = null;
 let currentStatus = STATUS_CONNECTING;
@@ -20,7 +18,7 @@ function safeReadEnv(name) {
       if (value) return value;
     }
   } catch {
-    // ignore
+    // no-op
   }
 
   if (typeof window !== 'undefined') {
@@ -47,14 +45,14 @@ function safeReadEnv(name) {
 }
 
 function resolveSocketUrl() {
-  const envUrl = (
+  const candidate = (
     safeReadEnv('VITE_SOCKET_URL')
-    || safeReadEnv('REACT_APP_SOCKET_URL')
     || safeReadEnv('NEXT_PUBLIC_SOCKET_URL')
+    || safeReadEnv('REACT_APP_SOCKET_URL')
   );
 
-  if (envUrl) {
-    return envUrl;
+  if (candidate) {
+    return candidate;
   }
 
   if (typeof window !== 'undefined' && window.location?.origin) {
@@ -64,25 +62,12 @@ function resolveSocketUrl() {
   return '/';
 }
 
-function resolveSocketPath() {
-  const envPath = safeReadEnv('VITE_SOCKET_PATH') || safeReadEnv('SOCKET_PATH');
-  if (!envPath) return '/socket.io';
-  return envPath.startsWith('/') ? envPath : `/${envPath}`;
-}
-
-function getTransportName() {
-  return socketInstance?.io?.engine?.transport?.name || null;
-}
-
 function notifyStatus(force = false) {
   const payload = {
     status: currentStatus,
-    connected: !!socketInstance?.connected,
     socketUrl: SOCKET_URL,
-    socketPath: SOCKET_PATH,
-    socketId: socketInstance?.id || null,
-    transport: getTransportName(),
-    lastError
+    lastError,
+    connected: !!socketInstance?.connected
   };
 
   for (const cb of statusListeners) {
@@ -94,7 +79,7 @@ function notifyStatus(force = false) {
   }
 }
 
-function setStatus(nextStatus, { error = undefined, force = false } = {}) {
+function setStatus(nextStatus, { error = null, force = false } = {}) {
   let changed = force;
 
   if (nextStatus && nextStatus !== currentStatus) {
@@ -102,12 +87,15 @@ function setStatus(nextStatus, { error = undefined, force = false } = {}) {
     changed = true;
   }
 
-  if (error !== undefined) {
+  if (error != null) {
     const msg = String(error || '');
     if (msg !== lastError) {
       lastError = msg;
       changed = true;
     }
+  } else if (error === null && lastError) {
+    lastError = '';
+    changed = true;
   }
 
   if (changed) {
@@ -121,9 +109,7 @@ function ensureSocket() {
   }
 
   socketInstance = io(SOCKET_URL, {
-    path: SOCKET_PATH,
-    transports: ['websocket', 'polling'],
-    withCredentials: true,
+    transports: ['websocket'],
     autoConnect: true,
     reconnection: true,
     reconnectionAttempts: Infinity,
@@ -135,35 +121,26 @@ function ensureSocket() {
   setStatus(STATUS_CONNECTING, { force: true });
 
   socketInstance.on('connect', () => {
-    setStatus(STATUS_CONNECTED, { error: '' });
-    console.log('[socket] connect', getSocketStatus());
+    setStatus(STATUS_CONNECTED, { error: null });
   });
 
   socketInstance.on('disconnect', (reason) => {
     setStatus(STATUS_DISCONNECTED, { error: reason || 'disconnect' });
-    console.log('[socket] disconnect', reason, getSocketStatus());
   });
 
   socketInstance.on('connect_error', (error) => {
     const message = error?.message || 'unknown error';
+    console.warn(`socket connect_error: ${message} ${SOCKET_URL}`);
     setStatus(STATUS_DISCONNECTED, { error: message });
-    console.log('[socket] connect_error', message, getSocketStatus());
   });
 
   if (socketInstance.io) {
-    socketInstance.io.on('reconnect_attempt', (attempt) => {
-      setStatus(STATUS_CONNECTING, { error: '' });
-      console.log('[socket] reconnect_attempt', attempt, getSocketStatus());
+    socketInstance.io.on('reconnect_attempt', () => {
+      setStatus(STATUS_CONNECTING, { error: null });
     });
 
     socketInstance.io.on('reconnect', () => {
-      setStatus(STATUS_CONNECTED, { error: '' });
-      console.log('[socket] reconnect', getSocketStatus());
-    });
-
-    socketInstance.io.on('error', (err) => {
-      const message = err?.message || String(err || 'io error');
-      setStatus(STATUS_DISCONNECTED, { error: message });
+      setStatus(STATUS_CONNECTED, { error: null });
     });
   }
 
@@ -178,19 +155,6 @@ export function isConnected() {
   return !!ensureSocket().connected;
 }
 
-export function getSocketStatus() {
-  const socket = ensureSocket();
-  return {
-    connected: !!socket.connected,
-    id: socket.id || null,
-    url: SOCKET_URL,
-    path: SOCKET_PATH,
-    transport: getTransportName(),
-    status: currentStatus,
-    lastError
-  };
-}
-
 export function onStatusChange(cb) {
   if (typeof cb !== 'function') {
     return () => {};
@@ -199,12 +163,9 @@ export function onStatusChange(cb) {
   statusListeners.add(cb);
   cb({
     status: currentStatus,
-    connected: !!socketInstance?.connected,
     socketUrl: SOCKET_URL,
-    socketPath: SOCKET_PATH,
-    socketId: socketInstance?.id || null,
-    transport: getTransportName(),
-    lastError
+    lastError,
+    connected: !!socketInstance?.connected
   }, { force: true });
 
   return () => {
@@ -219,42 +180,4 @@ export function emitSafe(event, payload = {}, { requireConnected = true } = {}) 
   }
   socket.emit(event, payload);
   return true;
-}
-
-export async function probeHealth(timeoutMs = 4000) {
-  const url = new URL('/health', SOCKET_URL).toString();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(url, {
-      method: 'GET',
-      cache: 'no-store',
-      credentials: 'include',
-      signal: controller.signal
-    });
-    const text = await response.text();
-    let parsed = null;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = text;
-    }
-
-    return {
-      ok: response.ok,
-      status: response.status,
-      url,
-      body: parsed
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      status: 0,
-      url,
-      body: String(error?.message || error || 'health check failed')
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
 }

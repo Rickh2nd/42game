@@ -8,7 +8,7 @@ import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { SEATS, toRelativeSeat } from '/src/scene/seats.js';
-import { emitSafe, getSocket, getSocketStatus, isConnected, onStatusChange, probeHealth } from '/src/net/socket.js';
+import { emitSafe, getSocket, isConnected, onStatusChange } from '/src/net/socket.js';
 
 const MODES = {
   TRUMPS: 'trumps',
@@ -61,14 +61,8 @@ const environmentStateText = document.getElementById('environmentStateText');
 const emojiOverlays = document.getElementById('emojiOverlays');
 const networkStatusValue = document.getElementById('networkStatusValue');
 const networkUrlValue = document.getElementById('networkUrlValue');
-const networkPathValue = document.getElementById('networkPathValue');
-const networkSocketIdValue = document.getElementById('networkSocketIdValue');
-const networkTransportValue = document.getElementById('networkTransportValue');
 const networkLastConnectValue = document.getElementById('networkLastConnectValue');
 const networkLastDisconnectValue = document.getElementById('networkLastDisconnectValue');
-const networkLastErrorValue = document.getElementById('networkLastErrorValue');
-const networkHealthValue = document.getElementById('networkHealthValue');
-const pingServerBtn = document.getElementById('pingServerBtn');
 const reconnectNowBtn = document.getElementById('reconnectNowBtn');
 
 const sectionRoom = document.getElementById('section-room');
@@ -331,15 +325,10 @@ let selectedDominoTileId = null;
 let pendingLocalBidChoice = null;
 let socketStatus = 'connecting';
 let socketUrl = window.location.origin;
-let socketPath = '/socket.io';
-let socketId = null;
-let socketTransport = null;
-let socketLastError = '';
 let networkLastConnectAt = null;
 let networkLastDisconnectReason = '';
 let socketHandlersBound = false;
 let lastDisconnectedToastAt = 0;
-let healthProbeInFlight = false;
 localClientId = localStorage.getItem(PLAYER_ID_STORAGE_KEY) || null;
 
 function logMessage(text, timeoutMs = 2600) {
@@ -380,30 +369,14 @@ function updateSocketUi() {
   if (networkUrlValue) {
     networkUrlValue.textContent = socketUrl || window.location.origin;
   }
-  if (networkPathValue) {
-    networkPathValue.textContent = socketPath || '/socket.io';
-  }
-  if (networkSocketIdValue) {
-    networkSocketIdValue.textContent = socketId || '—';
-  }
-  if (networkTransportValue) {
-    networkTransportValue.textContent = socketTransport || '—';
-  }
   if (networkLastConnectValue) {
     networkLastConnectValue.textContent = formatNetworkTime(networkLastConnectAt);
   }
   if (networkLastDisconnectValue) {
     networkLastDisconnectValue.textContent = networkLastDisconnectReason || '—';
   }
-  if (networkLastErrorValue) {
-    networkLastErrorValue.textContent = socketLastError || '—';
-    networkLastErrorValue.title = socketLastError || '';
-  }
   if (reconnectNowBtn) {
     reconnectNowBtn.disabled = connected;
-  }
-  if (pingServerBtn) {
-    pingServerBtn.disabled = !connected;
   }
 
   const connectionOnlyControls = [
@@ -419,35 +392,6 @@ function updateSocketUi() {
     if (!node) continue;
     node.disabled = !connected;
   }
-}
-
-async function runHealthProbe() {
-  if (healthProbeInFlight) return;
-  healthProbeInFlight = true;
-  if (networkHealthValue) {
-    networkHealthValue.textContent = 'checking...';
-    networkHealthValue.classList.remove('ok', 'fail');
-  }
-
-  const result = await probeHealth(5000);
-  if (networkHealthValue) {
-    if (result.ok) {
-      networkHealthValue.textContent = `ok (${result.status})`;
-      networkHealthValue.classList.remove('fail');
-      networkHealthValue.classList.add('ok');
-    } else {
-      networkHealthValue.textContent = `Server unreachable (${result.status || 'ERR'})`;
-      networkHealthValue.classList.remove('ok');
-      networkHealthValue.classList.add('fail');
-    }
-    networkHealthValue.title = result.url;
-  }
-
-  if (!result.ok) {
-    logMessage(`Server unreachable: ${result.url}`, 2400);
-  }
-
-  healthProbeInFlight = false;
 }
 
 function warnOnce(key, text) {
@@ -2977,10 +2921,6 @@ function connect() {
   onStatusChange((network) => {
     socketStatus = network.status || 'disconnected';
     socketUrl = network.socketUrl || window.location.origin;
-    socketPath = network.socketPath || '/socket.io';
-    socketId = network.socketId || null;
-    socketTransport = network.transport || null;
-    socketLastError = network.lastError || '';
     if (network.status === 'disconnected' && network.lastError) {
       networkLastDisconnectReason = String(network.lastError);
     }
@@ -2995,20 +2935,13 @@ function connect() {
   socket.on('connect', () => {
     networkLastConnectAt = Date.now();
     networkLastDisconnectReason = '';
-    const status = getSocketStatus();
-    socketId = status.id;
-    socketTransport = status.transport;
     updateSocketUi();
     sendClientHello();
-    runHealthProbe();
     logMessage('Connected', 1300);
   });
 
   socket.on('disconnect', (reason) => {
     networkLastDisconnectReason = String(reason || 'disconnect');
-    const status = getSocketStatus();
-    socketId = status.id;
-    socketTransport = status.transport;
     updateSocketUi();
     updateTimerControls();
     updateEnvironmentControls();
@@ -3016,13 +2949,6 @@ function connect() {
     updateTrumpControls();
     renderSeatControls();
     logMessage('Disconnected from server.', 2000);
-  });
-
-  socket.on('connect_error', (error) => {
-    const message = String(error?.message || 'connect_error');
-    socketLastError = message;
-    updateSocketUi();
-    logMessage(`Socket error: ${message} (${socketUrl}${socketPath})`, 2600);
   });
 
   socket.on('packet', (payload) => {
@@ -3050,12 +2976,8 @@ function connect() {
 
   if (socket.connected) {
     networkLastConnectAt = Date.now();
-    const status = getSocketStatus();
-    socketId = status.id;
-    socketTransport = status.transport;
     updateSocketUi();
     sendClientHello();
-    runHealthProbe();
   }
 }
 
@@ -3128,26 +3050,7 @@ function ensureButtons() {
   });
 
   reconnectNowBtn?.addEventListener('click', () => {
-    const socket = getSocket();
-    socket.disconnect();
-    socket.connect();
-  });
-
-  pingServerBtn?.addEventListener('click', () => {
-    const socket = getSocket();
-    if (!socket.connected) {
-      logMessage('Not connected to server.', 1600);
-      return;
-    }
-
-    socket.timeout(4000).emit('debug:ping', { from: localClientId || 'client', at: Date.now() }, (err, ack) => {
-      if (err) {
-        logMessage('Ping failed: timeout', 2200);
-        return;
-      }
-      const at = ack?.serverTime ? new Date(ack.serverTime).toLocaleTimeString() : 'n/a';
-      logMessage(`Ping ok (${at})`, 1800);
-    });
+    getSocket().connect();
   });
 
   panelToggle.addEventListener('click', () => {
@@ -3439,7 +3342,6 @@ updateEnvironmentControls();
 updateSocketUi();
 resetViewForLocalSeat(true);
 connect();
-runHealthProbe();
 
 Promise.all([loadAvatarManifest(), loadEnvironmentManifest(), loadEnvironmentModels()])
   .then(() => {

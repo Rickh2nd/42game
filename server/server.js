@@ -53,26 +53,15 @@ const FALLBACK_ENVIRONMENT_IDS = [
   'modern_office',
   'viking_longhouse'
 ];
-const SOCKET_PATH = process.env.SOCKET_PATH || '/socket.io';
 
 const app = express();
 app.use('/assets', express.static(path.join(ROOT_DIR, 'client', 'assets'), { fallthrough: false }));
 app.use(express.static(path.join(ROOT_DIR, 'client')));
 app.use('/shared', express.static(path.join(ROOT_DIR, 'shared')));
 app.use('/node_modules', express.static(path.join(ROOT_DIR, 'node_modules')));
-app.use((req, _res, next) => {
-  if (req.path === '/health' || req.path === '/socket-health') {
-    console.log(`[http] ${req.method} ${req.path} from ${req.ip || req.socket?.remoteAddress || 'unknown'}`);
-  }
-  next();
-});
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, now: Date.now() });
-});
-
-app.get('/socket-health', (_req, res) => {
-  res.type('text/plain').send('socket ok');
 });
 
 app.use((err, req, res, next) => {
@@ -88,33 +77,22 @@ app.get('*', (_req, res) => {
 });
 
 const httpServer = http.createServer(app);
-const allowedOrigins = new Set([
-  'http://localhost:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:5173',
-  process.env.RENDER_EXTERNAL_URL
-].filter(Boolean));
-for (const extra of (process.env.ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean)) {
-  allowedOrigins.add(extra);
-}
-const normalizeOrigin = (value) => String(value || '').trim().replace(/\/+$/, '');
-const normalizedAllowedOrigins = new Set([...allowedOrigins].map(normalizeOrigin).filter(Boolean));
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
 const io = new SocketIOServer(httpServer, {
-  path: SOCKET_PATH,
-  transports: ['websocket', 'polling'],
-  allowEIO3: true,
   cors: {
     origin(origin, callback) {
       if (!origin) {
         callback(null, true);
         return;
       }
-      if (!normalizedAllowedOrigins.size || normalizedAllowedOrigins.has(normalizeOrigin(origin))) {
+      if (!allowedOrigins.length || allowedOrigins.includes(origin)) {
         callback(null, true);
         return;
       }
-      callback(new Error(`CORS blocked origin: ${origin}`), false);
+      callback(new Error('Origin not allowed by CORS'));
     },
     methods: ['GET', 'POST'],
     credentials: true
@@ -1577,22 +1555,8 @@ function handleClientHello(socket, payload = {}) {
   syncIdentityAndState(clientId);
 }
 
-io.engine.on('connection_error', (err) => {
-  console.error('[socket] engine connection_error', {
-    code: err?.code,
-    message: err?.message,
-    context: err?.context
-  });
-});
-
 io.on('connection', (socket) => {
   const clientId = attachSocketToClient(socket);
-  console.log('[socket] connected', {
-    id: socket.id,
-    origin: socket.handshake?.headers?.origin || null,
-    url: socket.handshake?.url || null,
-    transport: socket.conn?.transport?.name || null
-  });
   syncIdentityAndState(clientId);
 
   socket.on('client:hello', (payload) => {
@@ -1611,14 +1575,7 @@ io.on('connection', (socket) => {
     handleAction(resolvedClientId, action, data.payload || {});
   });
 
-  socket.on('debug:ping', (payload, ack) => {
-    if (typeof ack === 'function') {
-      ack({ ok: true, serverTime: Date.now(), payload: payload ?? null });
-    }
-  });
-
-  socket.on('disconnect', (reason) => {
-    console.log('[socket] disconnected', { id: socket.id, reason: reason || 'unknown' });
+  socket.on('disconnect', () => {
     const resolvedClientId = socketToClientId.get(socket.id);
     if (!resolvedClientId) return;
 
@@ -1633,10 +1590,8 @@ io.on('connection', (socket) => {
   });
 });
 
-httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`[server] listening on ${PORT}`);
-  console.log('[server] allowedOrigins:', [...normalizedAllowedOrigins]);
-  console.log('[server] socket path:', SOCKET_PATH);
+httpServer.listen(PORT, () => {
+  console.log(`Texas 42 server listening on http://localhost:${PORT}`);
 });
 
 setInterval(() => {
