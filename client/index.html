@@ -41,6 +41,38 @@
 
         <div id="turnTimerHud">TIME: --</div>
 
+        <div id="burnPanels">
+          <aside class="burnPanel burnPanelLeft" id="burnPanel-team1" aria-label="Team 1 burn pile">
+            <div class="burnPanelInner">
+              <div class="burnPanelTitle" id="burn-title-team1">TEAM 1 BURN PILE</div>
+              <div class="burnPanelStats" id="burn-stats-team1">Tiles: 0 | Count pts: 0 | Hand: 0</div>
+              <div class="burnRowWrap">
+                <div class="burnDominoRow" id="burn-row-team1"></div>
+                <div class="burnOverflow" id="burn-overflow-team1"></div>
+              </div>
+              <div class="burnFooterTag" id="burn-footer-team1">
+                <div class="burnFooterName">Team 1 Captain</div>
+                <div class="burnFooterMeta">Seat 1 | Human</div>
+              </div>
+            </div>
+          </aside>
+
+          <aside class="burnPanel burnPanelRight" id="burnPanel-team2" aria-label="Team 2 burn pile">
+            <div class="burnPanelInner">
+              <div class="burnPanelTitle" id="burn-title-team2">TEAM 2 BURN PILE</div>
+              <div class="burnPanelStats" id="burn-stats-team2">Tiles: 0 | Count pts: 0 | Hand: 0</div>
+              <div class="burnRowWrap">
+                <div class="burnDominoRow" id="burn-row-team2"></div>
+                <div class="burnOverflow" id="burn-overflow-team2"></div>
+              </div>
+              <div class="burnFooterTag" id="burn-footer-team2">
+                <div class="burnFooterName">Team 2 Captain</div>
+                <div class="burnFooterMeta">Seat 2 | CPU</div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
         <div id="nameplates">
           <div class="nameplate" id="nameplate-0" data-seat="0"></div>
           <div class="nameplate" id="nameplate-1" data-seat="1"></div>
@@ -85,7 +117,6 @@
           <div class="buttonRow">
             <button id="startGameBtn">Start Game</button>
             <button id="restartGameBtn">Restart Game</button>
-            <button id="resetViewBtn">Reset View</button>
           </div>
           <div class="controlRow">
             <label>
@@ -102,6 +133,54 @@
             <select id="environmentSelect"></select>
             <img id="environmentPreview" alt="Background preview" />
             <div id="environmentStateText" class="smallText"></div>
+          </div>
+        </section>
+
+        <section id="section-view" class="panelSection">
+          <h2>VIEW</h2>
+          <div class="viewControl">
+            <label for="view_distance">Distance</label>
+            <input id="view_distance" type="range" min="0.40" max="2.50" step="0.01" />
+            <span id="view_distance_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="view_height">Height</label>
+            <input id="view_height" type="range" min="0.70" max="2.00" step="0.01" />
+            <span id="view_height_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="view_forward">Forward Offset</label>
+            <input id="view_forward" type="range" min="-0.60" max="0.60" step="0.01" />
+            <span id="view_forward_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="view_shoulder">Shoulder Offset</label>
+            <input id="view_shoulder" type="range" min="-0.60" max="0.60" step="0.01" />
+            <span id="view_shoulder_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="view_lookat_y">LookAt Height</label>
+            <input id="view_lookat_y" type="range" min="0.80" max="1.80" step="0.01" />
+            <span id="view_lookat_y_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="view_fov">FOV</label>
+            <input id="view_fov" type="range" min="35" max="85" step="1" />
+            <span id="view_fov_val" class="viewVal">0</span>
+          </div>
+          <div class="viewControl">
+            <label for="view_pitch_deg">Pitch</label>
+            <input id="view_pitch_deg" type="range" min="-20" max="20" step="0.5" />
+            <span id="view_pitch_deg_val" class="viewVal">0.0</span>
+          </div>
+          <div class="viewControl">
+            <label for="view_near">Near Clip</label>
+            <input id="view_near" type="range" min="0.01" max="0.20" step="0.01" />
+            <span id="view_near_val" class="viewVal">0.00</span>
+          </div>
+          <div class="buttonRow">
+            <button id="resetViewBtn">Reset View</button>
+            <button id="copyViewBtn">Copy View Settings</button>
           </div>
         </section>
 

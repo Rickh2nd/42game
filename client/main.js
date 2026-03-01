@@ -32,6 +32,7 @@ const DOMINO_Y = PLAY_PLANE_Y + DOMINO_THICKNESS / 2;
 const DEFAULT_AVATAR_ID = 'cowboy_male';
 const AVATAR_STORAGE_KEY = 'avatarId';
 const PLAYER_NAME_STORAGE_KEY = 'playerName';
+const VIEW_STORAGE_KEY = 'texas42_view_settings_v1';
 
 const canvas = document.getElementById('gameCanvas');
 const panel = document.getElementById('sidePanel');
@@ -49,6 +50,7 @@ const timerEnabledToggle = document.getElementById('timerEnabledToggle');
 const timerPauseBtn = document.getElementById('timerPauseBtn');
 const timerStateText = document.getElementById('timerStateText');
 const resetViewBtn = document.getElementById('resetViewBtn');
+const copyViewBtn = document.getElementById('copyViewBtn');
 const environmentSelect = document.getElementById('environmentSelect');
 const environmentPreview = document.getElementById('environmentPreview');
 const environmentStateText = document.getElementById('environmentStateText');
@@ -60,6 +62,7 @@ const sectionGame = document.getElementById('section-game');
 const sectionBidding = document.getElementById('section-bidding');
 const sectionTrump = document.getElementById('section-trump');
 const sectionMarks = document.getElementById('section-marks');
+const sectionView = document.getElementById('section-view');
 
 const bidButtonsWrap = document.getElementById('bidButtons');
 const trumpButtonsWrap = document.getElementById('trumpButtons');
@@ -77,6 +80,45 @@ const menuRoundsTeamA = document.getElementById('menu-rounds-teamA');
 const menuRoundsTeamB = document.getElementById('menu-rounds-teamB');
 const menuMarksTeamA = document.getElementById('menu-marks-teamA');
 const menuMarksTeamB = document.getElementById('menu-marks-teamB');
+
+const burnPanelDom = {
+  teamA: {
+    title: document.getElementById('burn-title-team1'),
+    stats: document.getElementById('burn-stats-team1'),
+    row: document.getElementById('burn-row-team1'),
+    overflow: document.getElementById('burn-overflow-team1'),
+    footer: document.getElementById('burn-footer-team1')
+  },
+  teamB: {
+    title: document.getElementById('burn-title-team2'),
+    stats: document.getElementById('burn-stats-team2'),
+    row: document.getElementById('burn-row-team2'),
+    overflow: document.getElementById('burn-overflow-team2'),
+    footer: document.getElementById('burn-footer-team2')
+  }
+};
+
+const viewInputs = {
+  distance: document.getElementById('view_distance'),
+  height: document.getElementById('view_height'),
+  forward: document.getElementById('view_forward'),
+  shoulder: document.getElementById('view_shoulder'),
+  lookAtY: document.getElementById('view_lookat_y'),
+  fov: document.getElementById('view_fov'),
+  pitchDeg: document.getElementById('view_pitch_deg'),
+  near: document.getElementById('view_near')
+};
+
+const viewValueLabels = {
+  distance: document.getElementById('view_distance_val'),
+  height: document.getElementById('view_height_val'),
+  forward: document.getElementById('view_forward_val'),
+  shoulder: document.getElementById('view_shoulder_val'),
+  lookAtY: document.getElementById('view_lookat_y_val'),
+  fov: document.getElementById('view_fov_val'),
+  pitchDeg: document.getElementById('view_pitch_deg_val'),
+  near: document.getElementById('view_near_val')
+};
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -107,8 +149,8 @@ controls.minDistance = 4.9;
 controls.maxDistance = 7.1;
 controls.minPolarAngle = 1.07;
 controls.maxPolarAngle = 1.5;
-controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
-controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
+controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
 controls.target.set(0, 0.78, 0);
 
 const visualsGroup = new THREE.Group();
@@ -218,7 +260,8 @@ const environmentTemplates = {
 };
 const tableMetrics = {
   topY: PLAY_PLANE_Y,
-  floorY: 0
+  floorY: 0,
+  radius: 2.9
 };
 const seatRuntime = [0, 1, 2, 3].map(() => ({
   chairSeatY: 0.42
@@ -242,6 +285,21 @@ const environmentById = new Map();
 let currentEnvironmentId = null;
 
 const timeoutPenaltyBySeat = new Map();
+const tempV3C = new THREE.Vector3();
+const tempV3D = new THREE.Vector3();
+
+const DEFAULT_VIEW_SETTINGS = {
+  distance: 1.85,
+  height: 1.24,
+  forward: -0.08,
+  shoulder: 0.19,
+  lookAtY: 0.78,
+  fov: 47,
+  pitchDeg: -2.5,
+  near: 0.08
+};
+
+const viewSettings = { ...DEFAULT_VIEW_SETTINGS };
 
 let ws = null;
 let localClientId = null;
@@ -281,6 +339,35 @@ function getStoredPlayerName() {
   const raw = (localStorage.getItem(PLAYER_NAME_STORAGE_KEY) || '').trim();
   if (!raw) return 'Player';
   return raw.slice(0, 24);
+}
+
+function loadStoredViewSettings() {
+  try {
+    const raw = localStorage.getItem(VIEW_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return;
+    for (const key of Object.keys(DEFAULT_VIEW_SETTINGS)) {
+      if (Number.isFinite(Number(parsed[key]))) {
+        viewSettings[key] = Number(parsed[key]);
+      }
+    }
+  } catch {
+    // ignore invalid stored view payload
+  }
+}
+
+function persistViewSettings() {
+  localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify({
+    distance: Number(viewSettings.distance),
+    height: Number(viewSettings.height),
+    forward: Number(viewSettings.forward),
+    shoulder: Number(viewSettings.shoulder),
+    lookAtY: Number(viewSettings.lookAtY),
+    fov: Number(viewSettings.fov),
+    pitchDeg: Number(viewSettings.pitchDeg),
+    near: Number(viewSettings.near)
+  }));
 }
 
 function formatTimerMs(ms) {
@@ -583,6 +670,10 @@ function updateTableMetricsFromObject(object3d) {
   if (!Number.isFinite(tmpBox.max.y) || !Number.isFinite(tmpBox.min.y)) return;
   tableMetrics.topY = tmpBox.max.y;
   tableMetrics.floorY = tmpBox.min.y;
+  const sizeX = Math.max(0.1, tmpBox.max.x - tmpBox.min.x);
+  const sizeZ = Math.max(0.1, tmpBox.max.z - tmpBox.min.z);
+  tableMetrics.radius = Math.max(1.8, Math.min(sizeX, sizeZ) * 0.48);
+  updateViewControlsUi();
 }
 
 function projectWorldToScreen(world, out = { x: 0, y: 0 }) {
@@ -769,6 +860,7 @@ function showSections() {
     room: false,
     players: false,
     game: false,
+    view: false,
     bidding: false,
     trump: false,
     marks: false
@@ -779,19 +871,24 @@ function showSections() {
   } else if (roomState.phase === PHASES.LOBBY) {
     show.players = true;
     show.game = true;
+    show.view = true;
     show.room = true;
   } else if (roomState.phase === PHASES.BIDDING) {
     show.game = true;
+    show.view = true;
     show.bidding = true;
   } else if (roomState.phase === PHASES.CHOOSE_MODE || roomState.phase === PHASES.CHOOSE_TRUMP) {
     show.game = true;
+    show.view = true;
     show.trump = true;
   } else if (roomState.phase === PHASES.PLAYING) {
     show.game = true;
+    show.view = true;
     show.marks = true;
     show.room = true;
   } else {
     show.game = true;
+    show.view = true;
     show.marks = true;
     show.room = true;
   }
@@ -799,6 +896,7 @@ function showSections() {
   sectionRoom.classList.toggle('hidden', !show.room);
   sectionPlayers.classList.toggle('hidden', !show.players);
   sectionGame.classList.toggle('hidden', !show.game);
+  sectionView.classList.toggle('hidden', !show.view);
   sectionBidding.classList.toggle('hidden', !show.bidding);
   sectionTrump.classList.toggle('hidden', !show.trump);
   sectionMarks.classList.toggle('hidden', !show.marks);
@@ -868,6 +966,148 @@ function updateMarksMenu() {
   renderTallies(menuRoundsTeamB, rounds.teamB);
   renderTallies(menuMarksTeamA, marks.teamA);
   renderTallies(menuMarksTeamB, marks.teamB);
+}
+
+function drawBurnPipsHalf(ctx, value, cx, cy, color) {
+  const layout = {
+    0: [],
+    1: [[0, 0]],
+    2: [[-0.18, -0.2], [0.18, 0.2]],
+    3: [[-0.18, -0.2], [0, 0], [0.18, 0.2]],
+    4: [[-0.18, -0.2], [0.18, -0.2], [-0.18, 0.2], [0.18, 0.2]],
+    5: [[-0.18, -0.2], [0.18, -0.2], [0, 0], [-0.18, 0.2], [0.18, 0.2]],
+    6: [[-0.18, -0.22], [0.18, -0.22], [-0.18, 0], [0.18, 0], [-0.18, 0.22], [0.18, 0.22]]
+  };
+  const points = layout[value] || [];
+  for (const [dx, dy] of points) {
+    const px = cx + dx * 39;
+    const py = cy + dy * 66;
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath();
+    ctx.arc(px + 0.5, py + 0.8, 4.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(px, py, 4.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function buildBurnDominoTile(tile, { highlightCount = false, mode = MODES.TRUMPS, trumpSuit = null } = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = `burnDominoTile${highlightCount ? ' countTile' : ''}`;
+  const canvasEl = document.createElement('canvas');
+  canvasEl.className = 'burnDominoCanvas';
+  canvasEl.width = 124;
+  canvasEl.height = 220;
+  const ctx = canvasEl.getContext('2d');
+
+  const pattern = ctx.createPattern(ivoryPatternCanvas, 'repeat');
+  ctx.fillStyle = pattern || '#eee1ca';
+  ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
+
+  const edgeShade = ctx.createLinearGradient(0, 0, canvasEl.width, 0);
+  edgeShade.addColorStop(0, 'rgba(100,76,48,0.12)');
+  edgeShade.addColorStop(0.08, 'rgba(255,255,255,0)');
+  edgeShade.addColorStop(0.92, 'rgba(255,255,255,0)');
+  edgeShade.addColorStop(1, 'rgba(100,76,48,0.12)');
+  ctx.fillStyle = edgeShade;
+  ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
+
+  ctx.strokeStyle = '#60472f';
+  ctx.lineWidth = 4.5;
+  ctx.strokeRect(4, 4, canvasEl.width - 8, canvasEl.height - 8);
+
+  ctx.strokeStyle = '#5a4731';
+  ctx.lineWidth = 3.4;
+  ctx.beginPath();
+  ctx.moveTo(8, 110);
+  ctx.lineTo(116, 110);
+  ctx.stroke();
+
+  const topColor = mode === MODES.TRUMPS && trumpSuit != null && tile.a === trumpSuit ? '#cf3df6' : '#151311';
+  const bottomColor = mode === MODES.TRUMPS && trumpSuit != null && tile.b === trumpSuit ? '#cf3df6' : '#151311';
+  drawBurnPipsHalf(ctx, tile.a, 62, 56, topColor);
+  drawBurnPipsHalf(ctx, tile.b, 62, 165, bottomColor);
+
+  wrap.appendChild(canvasEl);
+  return wrap;
+}
+
+function teamCaptainSeat(team) {
+  return team === 'teamA' ? 0 : 1;
+}
+
+function lastContributorForTeam(team) {
+  const seatIndex = Number.isInteger(roomState?.lastBurnContributor?.[team])
+    ? roomState.lastBurnContributor[team]
+    : teamCaptainSeat(team);
+  const seat = roomState?.seats?.[seatIndex];
+  if (!seat) {
+    return {
+      name: team === 'teamA' ? 'Team 1 Captain' : 'Team 2 Captain',
+      meta: `Seat ${seatIndex + 1} | CPU`
+    };
+  }
+  const typeLabel = seat.type === 'cpu' ? `CPU L${seat.cpuLevel ?? 0}` : 'Human';
+  return {
+    name: seat.name || `Seat ${seatIndex + 1}`,
+    meta: `Seat ${seatIndex + 1} | ${typeLabel}`
+  };
+}
+
+function renderBurnPanel(team, data) {
+  const panel = burnPanelDom[team];
+  if (!panel) return;
+
+  const titleTeam = team === 'teamA' ? 'TEAM 1 BURN PILE' : 'TEAM 2 BURN PILE';
+  const tiles = data.tiles || [];
+  const totalCountPoints = tiles.reduce((sum, tile) => sum + countTilePoints(tile), 0);
+  const handWins = Number(data.handWins || 0);
+  panel.title.textContent = titleTeam;
+  panel.stats.textContent = `Tiles: ${tiles.length} | Count pts: ${totalCountPoints} | Hand: ${handWins}`;
+
+  panel.row.replaceChildren();
+  const maxTiles = 7;
+  const visible = tiles.slice(-maxTiles);
+  for (const tile of visible) {
+    panel.row.appendChild(buildBurnDominoTile(tile, {
+      highlightCount: countTilePoints(tile) > 0,
+      mode: data.mode,
+      trumpSuit: data.trumpSuit
+    }));
+  }
+
+  const overflow = Math.max(0, tiles.length - visible.length);
+  panel.overflow.textContent = overflow > 0 ? `+${overflow} older tiles` : '';
+
+  const contributor = lastContributorForTeam(team);
+  panel.footer.innerHTML = `
+    <div class="burnFooterName">${contributor.name}</div>
+    <div class="burnFooterMeta">${contributor.meta}</div>
+  `;
+}
+
+function updateBurnPanels() {
+  if (!roomState) {
+    renderBurnPanel('teamA', { tiles: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
+    renderBurnPanel('teamB', { tiles: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
+    return;
+  }
+
+  renderBurnPanel('teamA', {
+    tiles: roomState.burnPiles?.teamA || [],
+    handWins: roomState.roundWins?.teamA || 0,
+    mode: roomState.mode || MODES.TRUMPS,
+    trumpSuit: roomState.trumpSuit
+  });
+  renderBurnPanel('teamB', {
+    tiles: roomState.burnPiles?.teamB || [],
+    handWins: roomState.roundWins?.teamB || 0,
+    mode: roomState.mode || MODES.TRUMPS,
+    trumpSuit: roomState.trumpSuit
+  });
 }
 
 function drawPips(ctx, value, xCenter, color) {
@@ -1423,29 +1663,134 @@ function updateSeatTransforms() {
   updatePenaltyEmojiPositions();
 }
 
-function cameraAnchorForSeat(seatIndex) {
+function clampValue(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function lookAtBounds() {
+  return {
+    min: Number((tableMetrics.topY - 0.2).toFixed(2)),
+    max: Number((tableMetrics.topY + 0.6).toFixed(2))
+  };
+}
+
+function sanitizeViewSettings() {
+  const lookBounds = lookAtBounds();
+  viewSettings.distance = clampValue(Number(viewSettings.distance), 0.4, 2.5);
+  viewSettings.height = clampValue(Number(viewSettings.height), 0.7, 2.0);
+  viewSettings.forward = clampValue(Number(viewSettings.forward), -0.6, 0.6);
+  viewSettings.shoulder = clampValue(Number(viewSettings.shoulder), -0.6, 0.6);
+  viewSettings.lookAtY = clampValue(Number(viewSettings.lookAtY), lookBounds.min, lookBounds.max);
+  viewSettings.fov = clampValue(Number(viewSettings.fov), 35, 85);
+  viewSettings.pitchDeg = clampValue(Number(viewSettings.pitchDeg), -20, 20);
+  viewSettings.near = clampValue(Number(viewSettings.near), 0.01, 0.2);
+}
+
+function updateViewControlsUi() {
+  sanitizeViewSettings();
+  const lookBounds = lookAtBounds();
+  viewInputs.lookAtY.min = `${lookBounds.min}`;
+  viewInputs.lookAtY.max = `${lookBounds.max}`;
+
+  for (const key of Object.keys(viewInputs)) {
+    const input = viewInputs[key];
+    const label = viewValueLabels[key];
+    if (!input || !label) continue;
+    input.value = `${viewSettings[key]}`;
+    label.textContent = key === 'fov'
+      ? `${Math.round(viewSettings[key])}`
+      : key === 'pitchDeg'
+        ? `${viewSettings[key].toFixed(1)}`
+        : viewSettings[key].toFixed(2);
+  }
+}
+
+function computeSeatedCameraPose(seatIndex, settings) {
   const localSeat = getLocalSeat();
   const rel = toRelativeSeat(seatIndex ?? 0, localSeat);
-  return SEATS[rel]?.camera || SEATS[0].camera;
+  const seat = SEATS[rel] || SEATS[0];
+  const avatarGroup = avatarSeatGroups[seatIndex];
+
+  const chairPos = tempV3A.set(seat.chair.pos[0], 0, seat.chair.pos[2]);
+  const forward = tempV3B.set(-chairPos.x, 0, -chairPos.z);
+  if (forward.lengthSq() < 0.0001) {
+    forward.set(0, 0, -1);
+  } else {
+    forward.normalize();
+  }
+
+  const right = tempV3C.set(0, 1, 0).cross(forward).normalize();
+  const anchor = tempV3D.set(seat.avatar.pos[0], seat.avatar.pos[1], seat.avatar.pos[2]);
+  if (avatarGroup) {
+    anchor.copy(avatarGroup.position);
+  }
+  anchor.y = Number(seatRuntime[seatIndex]?.chairSeatY || 0.42) + 0.94;
+
+  const pos = new THREE.Vector3()
+    .copy(anchor)
+    .addScaledVector(forward, -settings.distance)
+    .addScaledVector(forward, settings.forward)
+    .addScaledVector(right, settings.shoulder);
+  pos.y = settings.height;
+
+  const target = new THREE.Vector3(0, settings.lookAtY, 0);
+  const lookDistance = Math.max(0.9, pos.distanceTo(target));
+  const dir = target.clone().sub(pos).normalize();
+  if (Math.abs(settings.pitchDeg) > 0.001) {
+    dir.applyAxisAngle(right, (settings.pitchDeg * Math.PI) / 180);
+  }
+  target.copy(pos).addScaledVector(dir, lookDistance);
+
+  const radial = Math.hypot(pos.x, pos.z);
+  const safeRadius = Math.max(2.4, tableMetrics.radius + 1.12);
+  if (radial < safeRadius) {
+    const outX = radial <= 0.0001 ? 0 : pos.x / radial;
+    const outZ = radial <= 0.0001 ? 1 : pos.z / radial;
+    pos.x = outX * safeRadius;
+    pos.z = outZ * safeRadius;
+  }
+
+  if (pos.y <= tableMetrics.topY + 0.3) {
+    pos.y = tableMetrics.topY + 0.3;
+  }
+
+  return { position: pos, target };
+}
+
+function applyViewSettings(immediate = true) {
+  sanitizeViewSettings();
+  const localSeat = getLocalSeat();
+  const seatIndex = Number.isInteger(localSeat) ? localSeat : 0;
+  const pose = computeSeatedCameraPose(seatIndex, viewSettings);
+
+  camera.fov = viewSettings.fov;
+  camera.near = viewSettings.near;
+  camera.updateProjectionMatrix();
+
+  controls.minPolarAngle = 1.02;
+  controls.maxPolarAngle = 1.54;
+  controls.minDistance = Math.max(3.8, tableMetrics.radius + 1.02);
+  controls.maxDistance = Math.max(6.8, tableMetrics.radius + 3.8);
+
+  if (immediate) {
+    camera.position.copy(pose.position);
+    controls.target.copy(pose.target);
+  } else {
+    camera.position.lerp(pose.position, 0.26);
+    controls.target.lerp(pose.target, 0.26);
+  }
+  controls.update();
 }
 
 function resetViewForLocalSeat(immediate = true) {
-  const localSeat = getLocalSeat();
-  const seatIndex = Number.isInteger(localSeat) ? localSeat : 0;
-  const anchor = cameraAnchorForSeat(seatIndex);
-  const lookTarget = anchor?.lookAt || [0, 0.78, 0];
-  const targetY = Math.max(0.74, Math.min(tableMetrics.topY + 0.06, lookTarget[1]));
-  const nextPos = new THREE.Vector3(anchor.pos[0], anchor.pos[1], anchor.pos[2]);
-  const nextTarget = new THREE.Vector3(lookTarget[0], targetY, lookTarget[2]);
+  applyViewSettings(immediate);
+}
 
-  if (immediate) {
-    camera.position.copy(nextPos);
-    controls.target.copy(nextTarget);
-  } else {
-    camera.position.lerp(nextPos, 0.22);
-    controls.target.lerp(nextTarget, 0.22);
-  }
-  controls.update();
+function resetViewSettingsToDefault() {
+  Object.assign(viewSettings, DEFAULT_VIEW_SETTINGS);
+  persistViewSettings();
+  updateViewControlsUi();
+  applyViewSettings(true);
 }
 
 function getSeatHeadWorld(seatIndex, out = new THREE.Vector3()) {
@@ -1773,6 +2118,7 @@ function renderHandsAndTrick() {
       mesh.userData.tileId = tile.id;
       mesh.userData.seatIndex = localSeat;
       mesh.userData.clickable = true;
+      mesh.userData.baseY = mesh.position.y;
       handGroup.add(mesh);
     });
   }
@@ -1823,33 +2169,6 @@ function renderHandsAndTrick() {
 function renderBurnPiles() {
   clearGroup(burnGroupA);
   clearGroup(burnGroupB);
-  if (!roomState) return;
-
-  const aTiles = roomState.burnPiles?.teamA || [];
-  const bTiles = roomState.burnPiles?.teamB || [];
-  const renderPile = (tiles, group, xBase, zBase) => {
-    const sample = tiles.slice(-16);
-    const colGap = 0.26;
-    const rowGap = 0.71;
-    sample.forEach((tile, i) => {
-      const mesh = createDominoMesh(tile, {
-        faceUp: true,
-        scale: 1.11,
-        glowCount: countTilePoints(tile) > 0,
-        trumpSuit: roomState.trumpSuit,
-        useMagentaTrump: roomState.mode === MODES.TRUMPS
-      });
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      mesh.position.set(xBase + col * colGap, DOMINO_Y + row * 0.012, zBase + row * rowGap);
-      mesh.rotation.y = Math.PI / 2;
-      group.add(mesh);
-    });
-  };
-
-  // Team 1 left side, Team 2 right side.
-  renderPile(aTiles, burnGroupA, -5.45, -2.2);
-  renderPile(bTiles, burnGroupB, 5.02, -2.2);
 }
 
 function updateHud() {
@@ -1859,6 +2178,7 @@ function updateHud() {
     turnTimerHud.textContent = 'TIME: --';
     updateScoreboard();
     updateMarksMenu();
+    updateBurnPanels();
     updateTimerControls();
     updateEnvironmentControls();
     return;
@@ -1869,6 +2189,7 @@ function updateHud() {
 
   updateScoreboard();
   updateMarksMenu();
+  updateBurnPanels();
   updateTimerControls();
   updateEnvironmentControls();
 }
@@ -1938,6 +2259,45 @@ function updateEnvironmentControls() {
   } else {
     environmentStateText.textContent = `Host controls background (${entry?.name || safeId})`;
   }
+}
+
+function setupViewControls() {
+  const bindSlider = (key) => {
+    const input = viewInputs[key];
+    if (!input) return;
+    input.addEventListener('input', () => {
+      const value = Number(input.value);
+      if (!Number.isFinite(value)) return;
+      viewSettings[key] = value;
+      sanitizeViewSettings();
+      updateViewControlsUi();
+      persistViewSettings();
+      applyViewSettings(true);
+    });
+  };
+
+  for (const key of Object.keys(viewInputs)) {
+    bindSlider(key);
+  }
+
+  copyViewBtn.addEventListener('click', async () => {
+    const payload = JSON.stringify({
+      distance: Number(viewSettings.distance),
+      height: Number(viewSettings.height),
+      forward: Number(viewSettings.forward),
+      shoulder: Number(viewSettings.shoulder),
+      lookAtY: Number(viewSettings.lookAtY),
+      fov: Number(viewSettings.fov),
+      pitchDeg: Number(viewSettings.pitchDeg),
+      near: Number(viewSettings.near)
+    }, null, 2);
+    try {
+      await navigator.clipboard.writeText(payload);
+      logMessage('View settings copied.');
+    } catch {
+      logMessage('Clipboard unavailable.');
+    }
+  });
 }
 
 function updateNameplates() {
@@ -2523,7 +2883,8 @@ function ensureButtons() {
   });
 
   resetViewBtn.addEventListener('click', () => {
-    resetViewForLocalSeat(true);
+    localStorage.removeItem(VIEW_STORAGE_KEY);
+    resetViewSettingsToDefault();
   });
 
   timerEnabledToggle.addEventListener('change', () => {
@@ -2618,7 +2979,8 @@ function ensureButtons() {
 function addPointerInteraction() {
   const applyVisualState = (mesh, { hovered, selected }) => {
     if (!mesh?.isMesh) return;
-    const targetY = DOMINO_Y + (selected ? 0.1 : hovered ? 0.045 : 0);
+    const baseY = Number.isFinite(mesh.userData?.baseY) ? mesh.userData.baseY : DOMINO_Y;
+    const targetY = baseY + (selected ? 0.095 : hovered ? 0.04 : 0);
     mesh.position.y = targetY;
     const topMat = Array.isArray(mesh.material) ? mesh.material[2] : null;
     if (topMat?.emissive) {
@@ -2696,6 +3058,7 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  applyViewSettings(false);
   controls.update();
   updatePenaltyEmojiPositions();
 }
@@ -2806,7 +3169,10 @@ async function loadEnvironmentManifest() {
 
 window.addEventListener('resize', onResize);
 
+loadStoredViewSettings();
+updateViewControlsUi();
 initHdrEnvironment();
+setupViewControls();
 ensureButtons();
 addPointerInteraction();
 showSections();

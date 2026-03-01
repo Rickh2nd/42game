@@ -176,6 +176,7 @@ function createRoom(roomId, hostClientId) {
     gameMarks: { teamA: 0, teamB: 0 },
     champsTeam: null,
     burnPiles: { teamA: [], teamB: [] },
+    lastBurnContributor: { teamA: 0, teamB: 1 },
     hands: { 0: [], 1: [], 2: [], 3: [] },
     handNumber: 0,
     sevensState: null,
@@ -272,6 +273,10 @@ function roomPublicSnapshot(room, viewerClientId) {
     burnPiles: {
       teamA: room.burnPiles.teamA.map((tile) => ({ ...tile })),
       teamB: room.burnPiles.teamB.map((tile) => ({ ...tile }))
+    },
+    lastBurnContributor: {
+      teamA: Number.isInteger(room.lastBurnContributor?.teamA) ? room.lastBurnContributor.teamA : 0,
+      teamB: Number.isInteger(room.lastBurnContributor?.teamB) ? room.lastBurnContributor.teamB : 1
     },
     bidHistory: room.bidHistory.map((entry) => ({ ...entry })),
     bidBySeat: makeBidSummary(room.bidHistory),
@@ -611,6 +616,7 @@ function startNewHand(room, { resetMarks = false } = {}) {
   room.pointsThisHand = { teamA: 0, teamB: 0 };
   room.targetThisHand = { teamA: 0, teamB: 0 };
   room.burnPiles = { teamA: [], teamB: [] };
+  room.lastBurnContributor = { teamA: 0, teamB: 1 };
   room.activeSeats = [0, 1, 2, 3];
   room.sevensState = null;
   room.sevensResult = null;
@@ -671,6 +677,7 @@ function enterPlayingPhase(room) {
   room.played = [];
   room.pointsThisHand = { teamA: 0, teamB: 0 };
   room.burnPiles = { teamA: [], teamB: [] };
+  room.lastBurnContributor = { teamA: 0, teamB: 1 };
   room.phase = PHASES.PLAYING;
 
   if (room.mode === MODES.SEVENS) {
@@ -793,6 +800,7 @@ function completeTrick(room) {
 
   room.pointsThisHand[winnerTeam] += result.points;
   room.burnPiles[winnerTeam].push(...room.trick.map((play) => ({ ...play.tile })));
+  room.lastBurnContributor[winnerTeam] = result.winnerSeat;
   room.turnSeat = result.winnerSeat;
 
   room.trickHistory.push({
