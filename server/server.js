@@ -220,6 +220,8 @@ function createRoom(roomId, hostClientId) {
     gameMarks: { teamA: 0, teamB: 0 },
     champsTeam: null,
     burnPiles: { teamA: [], teamB: [] },
+    burnHandsTeamA: [],
+    burnHandsTeamB: [],
     lastBurnContributor: { teamA: 0, teamB: 1 },
     hands: { 0: [], 1: [], 2: [], 3: [] },
     handNumber: 0,
@@ -342,6 +344,20 @@ function roomPublicSnapshot(room, viewerClientId) {
       teamA: room.burnPiles.teamA.map((tile) => ({ ...tile })),
       teamB: room.burnPiles.teamB.map((tile) => ({ ...tile }))
     },
+    burnHandsTeamA: (room.burnHandsTeamA || []).map((record) => ({
+      handIndex: Number(record.handIndex || 0),
+      tiles: (record.tiles || []).map((tile) => ({ ...tile })),
+      countPoints: Number(record.countPoints || 0),
+      winnerSeat: Number.isInteger(record.winnerSeat) ? record.winnerSeat : null,
+      timestamp: Number(record.timestamp || 0)
+    })),
+    burnHandsTeamB: (room.burnHandsTeamB || []).map((record) => ({
+      handIndex: Number(record.handIndex || 0),
+      tiles: (record.tiles || []).map((tile) => ({ ...tile })),
+      countPoints: Number(record.countPoints || 0),
+      winnerSeat: Number.isInteger(record.winnerSeat) ? record.winnerSeat : null,
+      timestamp: Number(record.timestamp || 0)
+    })),
     lastBurnContributor: {
       teamA: Number.isInteger(room.lastBurnContributor?.teamA) ? room.lastBurnContributor.teamA : 0,
       teamB: Number.isInteger(room.lastBurnContributor?.teamB) ? room.lastBurnContributor.teamB : 1
@@ -664,6 +680,8 @@ function startNewHand(room, { resetMarks = false } = {}) {
     room.gameMarks = { teamA: 0, teamB: 0 };
     room.champsTeam = null;
     room.handNumber = 0;
+    room.burnHandsTeamA = [];
+    room.burnHandsTeamB = [];
   }
 
   prepareSeatsForGame(room);
@@ -684,6 +702,8 @@ function startNewHand(room, { resetMarks = false } = {}) {
   room.pointsThisHand = { teamA: 0, teamB: 0 };
   room.targetThisHand = { teamA: 0, teamB: 0 };
   room.burnPiles = { teamA: [], teamB: [] };
+  room.burnHandsTeamA = Array.isArray(room.burnHandsTeamA) ? room.burnHandsTeamA : [];
+  room.burnHandsTeamB = Array.isArray(room.burnHandsTeamB) ? room.burnHandsTeamB : [];
   room.lastBurnContributor = { teamA: 0, teamB: 1 };
   room.activeSeats = [0, 1, 2, 3];
   room.sevensState = null;
@@ -771,8 +791,34 @@ function enterPlayingPhase(room) {
   syncTurnTimerForState(room, { newTurn: true });
 }
 
+function recordBurnHandForWinner(room, winnerTeam) {
+  if (!winnerTeam || !room.burnPiles?.[winnerTeam]) return;
+  const tiles = room.burnPiles[winnerTeam].map((tile) => ({ ...tile }));
+  const countPoints = tiles.reduce((sum, tile) => sum + countTilePoints(tile), 0);
+  const winnerSeat = Number.isInteger(room.lastBurnContributor?.[winnerTeam])
+    ? room.lastBurnContributor[winnerTeam]
+    : null;
+  const record = {
+    handIndex: Number(room.handNumber || 0),
+    tiles,
+    countPoints,
+    winnerSeat,
+    timestamp: Date.now()
+  };
+
+  const key = winnerTeam === 'teamA' ? 'burnHandsTeamA' : 'burnHandsTeamB';
+  if (!Array.isArray(room[key])) {
+    room[key] = [];
+  }
+  room[key].unshift(record);
+  if (room[key].length > 32) {
+    room[key].length = 32;
+  }
+}
+
 function finishHand(room) {
   const outcome = evaluateHandOutcome(room, room.config);
+  recordBurnHandForWinner(room, outcome.winnerTeam);
   const nextScores = updateRoundWinsAndMarks(room.roundWins, room.gameMarks, outcome.winnerTeam, room.config);
 
   room.roundWins = nextScores.roundWins;

@@ -47,8 +47,7 @@
               <div class="burnPanelTitle" id="burn-title-team1">TEAM 1 BURN PILE</div>
               <div class="burnPanelStats" id="burn-stats-team1">Tiles: 0 | Count pts: 0 | Hand: 0</div>
               <div class="burnRowWrap">
-                <div class="burnDominoRow" id="burn-row-team1"></div>
-                <div class="burnOverflow" id="burn-overflow-team1"></div>
+                <div class="burnHandsStack" id="burn-hands-team1"></div>
               </div>
               <div class="burnFooterTag" id="burn-footer-team1">
                 <div class="burnFooterName">Team 1 Captain</div>
@@ -62,8 +61,7 @@
               <div class="burnPanelTitle" id="burn-title-team2">TEAM 2 BURN PILE</div>
               <div class="burnPanelStats" id="burn-stats-team2">Tiles: 0 | Count pts: 0 | Hand: 0</div>
               <div class="burnRowWrap">
-                <div class="burnDominoRow" id="burn-row-team2"></div>
-                <div class="burnOverflow" id="burn-overflow-team2"></div>
+                <div class="burnHandsStack" id="burn-hands-team2"></div>
               </div>
               <div class="burnFooterTag" id="burn-footer-team2">
                 <div class="burnFooterName">Team 2 Captain</div>
@@ -184,47 +182,105 @@
           <h2>VIEW</h2>
           <div class="viewControl">
             <label for="view_distance">Distance</label>
-            <input id="view_distance" type="range" min="0.40" max="2.50" step="0.01" />
+            <input id="view_distance" type="range" min="0.25" max="4.50" step="0.01" />
             <span id="view_distance_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_height">Height</label>
-            <input id="view_height" type="range" min="0.70" max="2.00" step="0.01" />
+            <input id="view_height" type="range" min="0.40" max="3.00" step="0.01" />
             <span id="view_height_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_forward">Forward Offset</label>
-            <input id="view_forward" type="range" min="-0.60" max="0.60" step="0.01" />
+            <input id="view_forward" type="range" min="-1.50" max="1.50" step="0.01" />
             <span id="view_forward_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_shoulder">Shoulder Offset</label>
-            <input id="view_shoulder" type="range" min="-0.60" max="0.60" step="0.01" />
+            <input id="view_shoulder" type="range" min="-1.25" max="1.25" step="0.01" />
             <span id="view_shoulder_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_lookat_y">LookAt Height</label>
-            <input id="view_lookat_y" type="range" min="0.80" max="1.80" step="0.01" />
+            <input id="view_lookat_y" type="range" min="0.20" max="3.00" step="0.01" />
             <span id="view_lookat_y_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_fov">FOV</label>
-            <input id="view_fov" type="range" min="35" max="85" step="1" />
+            <input id="view_fov" type="range" min="25" max="100" step="1" />
             <span id="view_fov_val" class="viewVal">0</span>
           </div>
           <div class="viewControl">
             <label for="view_pitch_deg">Pitch</label>
-            <input id="view_pitch_deg" type="range" min="-20" max="20" step="0.5" />
+            <input id="view_pitch_deg" type="range" min="-45" max="45" step="0.5" />
             <span id="view_pitch_deg_val" class="viewVal">0.0</span>
           </div>
           <div class="viewControl">
             <label for="view_near">Near Clip</label>
-            <input id="view_near" type="range" min="0.01" max="0.20" step="0.01" />
+            <input id="view_near" type="range" min="0.005" max="0.50" step="0.005" />
             <span id="view_near_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="hand_y">Hand Vertical Offset</label>
+            <input id="hand_y" type="range" min="-0.20" max="0.40" step="0.01" />
+            <span id="hand_y_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="hand_z">Hand Distance Offset</label>
+            <input id="hand_z" type="range" min="-1.00" max="1.00" step="0.01" />
+            <span id="hand_z_val" class="viewVal">0.00</span>
           </div>
           <div class="buttonRow">
             <button id="resetViewBtn">Reset View</button>
             <button id="copyViewBtn">Copy View Settings</button>
+          </div>
+        </section>
+
+        <section id="section-scene-tuning" class="panelSection">
+          <h2>SCENE TUNING</h2>
+          <div class="viewControl">
+            <label for="tune_table_scale">Table Scale</label>
+            <input id="tune_table_scale" type="range" min="0.50" max="2.50" step="0.01" />
+            <span id="tune_table_scale_val" class="viewVal">1.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="tune_chair_scale">Chair Scale</label>
+            <input id="tune_chair_scale" type="range" min="0.50" max="2.50" step="0.01" />
+            <span id="tune_chair_scale_val" class="viewVal">1.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="tune_avatar_scale">Avatar Scale</label>
+            <input id="tune_avatar_scale" type="range" min="0.50" max="2.50" step="0.01" />
+            <span id="tune_avatar_scale_val" class="viewVal">1.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="tune_seat_radius">Seat Radius</label>
+            <input id="tune_seat_radius" type="range" min="1.00" max="5.00" step="0.01" />
+            <span id="tune_seat_radius_val" class="viewVal">1.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="tune_avatar_back">Avatar Seat Back Offset</label>
+            <input id="tune_avatar_back" type="range" min="-1.00" max="1.00" step="0.01" />
+            <span id="tune_avatar_back_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="tune_avatar_y">Avatar Seat Height Offset</label>
+            <input id="tune_avatar_y" type="range" min="-0.50" max="0.50" step="0.01" />
+            <span id="tune_avatar_y_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="tune_chair_y">Chair Height Offset</label>
+            <input id="tune_chair_y" type="range" min="-0.50" max="0.50" step="0.01" />
+            <span id="tune_chair_y_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="tune_table_y">Table Height Offset</label>
+            <input id="tune_table_y" type="range" min="-0.50" max="0.50" step="0.01" />
+            <span id="tune_table_y_val" class="viewVal">0.00</span>
+          </div>
+          <div class="buttonRow">
+            <button id="resetSceneTuningBtn">Reset Scene Tuning</button>
+            <button id="copySceneTuningBtn">Copy Scene Tuning JSON</button>
           </div>
         </section>
 

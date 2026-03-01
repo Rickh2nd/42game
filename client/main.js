@@ -27,13 +27,17 @@ const PHASES = {
 };
 
 const PLAY_PLANE_Y = 0.6;
-const DOMINO_THICKNESS = 0.14;
+const DOMINO_LONG = 0.31;
+const DOMINO_SHORT = 0.155;
+const DOMINO_THICKNESS = 0.02;
+const DOMINO_SCALE = 1.0;
 const DOMINO_Y = PLAY_PLANE_Y + DOMINO_THICKNESS / 2;
 
 const DEFAULT_AVATAR_ID = 'cowboy_male';
 const AVATAR_STORAGE_KEY = 'avatarId';
 const PLAYER_NAME_STORAGE_KEY = 'playerName';
 const VIEW_STORAGE_KEY = 'texas42_view_settings_v1';
+const SCENE_TUNING_STORAGE_KEY = 'texas42_scene_tuning_v1';
 const PLAYER_ID_STORAGE_KEY = 'texas42_player_id';
 const CLIENT_VERSION = '1.0.0';
 
@@ -55,6 +59,8 @@ const timerPauseBtn = document.getElementById('timerPauseBtn');
 const timerStateText = document.getElementById('timerStateText');
 const resetViewBtn = document.getElementById('resetViewBtn');
 const copyViewBtn = document.getElementById('copyViewBtn');
+const resetSceneTuningBtn = document.getElementById('resetSceneTuningBtn');
+const copySceneTuningBtn = document.getElementById('copySceneTuningBtn');
 const environmentSelect = document.getElementById('environmentSelect');
 const environmentPreview = document.getElementById('environmentPreview');
 const environmentStateText = document.getElementById('environmentStateText');
@@ -78,6 +84,7 @@ const sectionBidding = document.getElementById('section-bidding');
 const sectionTrump = document.getElementById('section-trump');
 const sectionMarks = document.getElementById('section-marks');
 const sectionView = document.getElementById('section-view');
+const sectionSceneTuning = document.getElementById('section-scene-tuning');
 
 const bidButtonsWrap = document.getElementById('bidButtons');
 const trumpButtonsWrap = document.getElementById('trumpButtons');
@@ -100,15 +107,13 @@ const burnPanelDom = {
   teamA: {
     title: document.getElementById('burn-title-team1'),
     stats: document.getElementById('burn-stats-team1'),
-    row: document.getElementById('burn-row-team1'),
-    overflow: document.getElementById('burn-overflow-team1'),
+    stack: document.getElementById('burn-hands-team1'),
     footer: document.getElementById('burn-footer-team1')
   },
   teamB: {
     title: document.getElementById('burn-title-team2'),
     stats: document.getElementById('burn-stats-team2'),
-    row: document.getElementById('burn-row-team2'),
-    overflow: document.getElementById('burn-overflow-team2'),
+    stack: document.getElementById('burn-hands-team2'),
     footer: document.getElementById('burn-footer-team2')
   }
 };
@@ -121,7 +126,9 @@ const viewInputs = {
   lookAtY: document.getElementById('view_lookat_y'),
   fov: document.getElementById('view_fov'),
   pitchDeg: document.getElementById('view_pitch_deg'),
-  near: document.getElementById('view_near')
+  near: document.getElementById('view_near'),
+  handY: document.getElementById('hand_y'),
+  handZ: document.getElementById('hand_z')
 };
 
 const viewValueLabels = {
@@ -132,7 +139,31 @@ const viewValueLabels = {
   lookAtY: document.getElementById('view_lookat_y_val'),
   fov: document.getElementById('view_fov_val'),
   pitchDeg: document.getElementById('view_pitch_deg_val'),
-  near: document.getElementById('view_near_val')
+  near: document.getElementById('view_near_val'),
+  handY: document.getElementById('hand_y_val'),
+  handZ: document.getElementById('hand_z_val')
+};
+
+const sceneTuneInputs = {
+  tableScale: document.getElementById('tune_table_scale'),
+  chairScale: document.getElementById('tune_chair_scale'),
+  avatarScale: document.getElementById('tune_avatar_scale'),
+  seatRadius: document.getElementById('tune_seat_radius'),
+  avatarBack: document.getElementById('tune_avatar_back'),
+  avatarY: document.getElementById('tune_avatar_y'),
+  chairY: document.getElementById('tune_chair_y'),
+  tableY: document.getElementById('tune_table_y')
+};
+
+const sceneTuneLabels = {
+  tableScale: document.getElementById('tune_table_scale_val'),
+  chairScale: document.getElementById('tune_chair_scale_val'),
+  avatarScale: document.getElementById('tune_avatar_scale_val'),
+  seatRadius: document.getElementById('tune_seat_radius_val'),
+  avatarBack: document.getElementById('tune_avatar_back_val'),
+  avatarY: document.getElementById('tune_avatar_y_val'),
+  chairY: document.getElementById('tune_chair_y_val'),
+  tableY: document.getElementById('tune_table_y_val')
 };
 
 const renderer = new THREE.WebGLRenderer({
@@ -256,7 +287,7 @@ axesHelper.position.y = PLAY_PLANE_Y;
 axesHelper.visible = false;
 scene.add(axesHelper);
 
-const dominoGeometry = new RoundedBoxGeometry(1.24, DOMINO_THICKNESS, 0.62, 5, 0.052);
+const dominoGeometry = new RoundedBoxGeometry(DOMINO_LONG, DOMINO_THICKNESS, DOMINO_SHORT, 4, 0.011);
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const clock = new THREE.Clock();
@@ -291,6 +322,7 @@ let draggingStartOffset = { x: 0, y: 0 };
 
 const tmpV3A = new THREE.Vector3();
 const tmpV3B = new THREE.Vector3();
+const tmpV3E = new THREE.Vector3();
 const tmpBox = new THREE.Box3();
 
 const avatarCatalog = [];
@@ -311,10 +343,25 @@ const DEFAULT_VIEW_SETTINGS = {
   lookAtY: 0.78,
   fov: 47,
   pitchDeg: -2.5,
-  near: 0.08
+  near: 0.08,
+  handY: 0.02,
+  handZ: 0.0
 };
 
 const viewSettings = { ...DEFAULT_VIEW_SETTINGS };
+
+const DEFAULT_SCENE_TUNING = {
+  tableScale: 1.46,
+  chairScale: 1.0,
+  avatarScale: 1.0,
+  seatRadius: 3.12,
+  avatarBack: 0.0,
+  avatarY: 0.0,
+  chairY: 0.0,
+  tableY: 0.0
+};
+
+const sceneTuning = { ...DEFAULT_SCENE_TUNING };
 
 let localClientId = null;
 let roomState = null;
@@ -342,6 +389,14 @@ let lastDisconnectedToastAt = 0;
 let socketInfoPollTimer = null;
 let healthPollTimer = null;
 localClientId = localStorage.getItem(PLAYER_ID_STORAGE_KEY) || null;
+
+const localHandScreenBounds = {
+  valid: false,
+  minX: 0,
+  maxX: 0,
+  minY: 0,
+  maxY: 0
+};
 
 function logMessage(text, timeoutMs = 2600) {
   eventLog.textContent = text;
@@ -523,7 +578,38 @@ function persistViewSettings() {
     lookAtY: Number(viewSettings.lookAtY),
     fov: Number(viewSettings.fov),
     pitchDeg: Number(viewSettings.pitchDeg),
-    near: Number(viewSettings.near)
+    near: Number(viewSettings.near),
+    handY: Number(viewSettings.handY),
+    handZ: Number(viewSettings.handZ)
+  }));
+}
+
+function loadStoredSceneTuning() {
+  try {
+    const raw = localStorage.getItem(SCENE_TUNING_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return;
+    for (const key of Object.keys(DEFAULT_SCENE_TUNING)) {
+      if (Number.isFinite(Number(parsed[key]))) {
+        sceneTuning[key] = Number(parsed[key]);
+      }
+    }
+  } catch {
+    // ignore invalid scene tuning payload
+  }
+}
+
+function persistSceneTuning() {
+  localStorage.setItem(SCENE_TUNING_STORAGE_KEY, JSON.stringify({
+    tableScale: Number(sceneTuning.tableScale),
+    chairScale: Number(sceneTuning.chairScale),
+    avatarScale: Number(sceneTuning.avatarScale),
+    seatRadius: Number(sceneTuning.seatRadius),
+    avatarBack: Number(sceneTuning.avatarBack),
+    avatarY: Number(sceneTuning.avatarY),
+    chairY: Number(sceneTuning.chairY),
+    tableY: Number(sceneTuning.tableY)
   }));
 }
 
@@ -876,31 +962,77 @@ function endNameplateDrag() {
   draggingPointerId = null;
 }
 
+function refreshLocalHandScreenBounds() {
+  localHandScreenBounds.valid = false;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  const screen = { x: 0, y: 0 };
+
+  handGroup.traverse((node) => {
+    if (!node?.isMesh || !node.userData?.clickable) return;
+    tmpV3A.setFromMatrixPosition(node.matrixWorld);
+    projectWorldToScreen(tmpV3A, screen);
+    // Approximate tile footprint in pixels to guard nameplate overlap.
+    const padX = 62;
+    const padY = 44;
+    minX = Math.min(minX, screen.x - padX);
+    minY = Math.min(minY, screen.y - padY);
+    maxX = Math.max(maxX, screen.x + padX);
+    maxY = Math.max(maxY, screen.y + padY);
+  });
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return;
+  }
+
+  localHandScreenBounds.valid = true;
+  localHandScreenBounds.minX = minX;
+  localHandScreenBounds.minY = minY;
+  localHandScreenBounds.maxX = maxX;
+  localHandScreenBounds.maxY = maxY;
+}
+
 function updateNameplatePositions() {
   const localSeat = getLocalSeat();
   const screen = { x: 0, y: 0 };
   const handScreen = { x: 0, y: 0 };
+  refreshLocalHandScreenBounds();
 
   for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
     const rel = toRelativeSeat(seatIndex, localSeat);
     const node = document.getElementById(`nameplate-${seatIndex}`);
     if (!node) continue;
 
-    const anchor = SEATS[rel]?.nameplateAnchor?.pos || [0, 1.8, 0];
-    tmpV3B.set(anchor[0], anchor[1], anchor[2]);
-    tableRoot.localToWorld(tmpV3B);
+    getSeatHeadWorld(seatIndex, tmpV3B);
+    tmpV3B.y += 0.18;
     projectWorldToScreen(tmpV3B, screen);
 
     let x = screen.x + nameplateOffsets[seatIndex].x;
     let y = screen.y + nameplateOffsets[seatIndex].y;
 
-    const handAnchor = SEATS[rel]?.handAnchor?.pos || [0, PLAY_PLANE_Y, 0];
-    tmpV3B.set(handAnchor[0], handAnchor[1], handAnchor[2]);
-    tableRoot.localToWorld(tmpV3B);
-    projectWorldToScreen(tmpV3B, handScreen);
+    if (seatIndex === localSeat && localHandScreenBounds.valid) {
+      const npHalfW = 132;
+      const npHalfH = 46;
+      const overlap = (
+        x + npHalfW > localHandScreenBounds.minX &&
+        x - npHalfW < localHandScreenBounds.maxX &&
+        y + npHalfH > localHandScreenBounds.minY &&
+        y - npHalfH < localHandScreenBounds.maxY
+      );
+      if (overlap) {
+        y = localHandScreenBounds.minY - 76;
+      }
+    } else {
+      const handAnchor = SEATS[rel]?.handAnchor?.pos || [0, PLAY_PLANE_Y, 0];
+      tmpV3B.set(handAnchor[0], handAnchor[1], handAnchor[2]);
+      tableRoot.localToWorld(tmpV3B);
+      projectWorldToScreen(tmpV3B, handScreen);
 
-    if (Math.abs(x - handScreen.x) < 120 && Math.abs(y - handScreen.y) < 84) {
-      y -= 82;
+      if (Math.abs(x - handScreen.x) < 120 && Math.abs(y - handScreen.y) < 84) {
+        y -= 82;
+      }
     }
 
     if (rel === 0 && y > window.innerHeight - 185) {
@@ -1018,6 +1150,7 @@ function showSections() {
     players: false,
     game: false,
     view: false,
+    sceneTuning: false,
     bidding: false,
     trump: false,
     marks: false
@@ -1029,23 +1162,28 @@ function showSections() {
     show.players = true;
     show.game = true;
     show.view = true;
+    show.sceneTuning = true;
     show.room = true;
   } else if (roomState.phase === PHASES.BIDDING) {
     show.game = true;
     show.view = true;
+    show.sceneTuning = true;
     show.bidding = true;
   } else if (roomState.phase === PHASES.CHOOSE_MODE || roomState.phase === PHASES.CHOOSE_TRUMP) {
     show.game = true;
     show.view = true;
+    show.sceneTuning = true;
     show.trump = true;
   } else if (roomState.phase === PHASES.PLAYING) {
     show.game = true;
     show.view = true;
+    show.sceneTuning = true;
     show.marks = true;
     show.room = true;
   } else {
     show.game = true;
     show.view = true;
+    show.sceneTuning = true;
     show.marks = true;
     show.room = true;
   }
@@ -1054,6 +1192,7 @@ function showSections() {
   sectionPlayers.classList.toggle('hidden', !show.players);
   sectionGame.classList.toggle('hidden', !show.game);
   sectionView.classList.toggle('hidden', !show.view);
+  sectionSceneTuning.classList.toggle('hidden', !show.sceneTuning);
   sectionBidding.classList.toggle('hidden', !show.bidding);
   sectionTrump.classList.toggle('hidden', !show.trump);
   sectionMarks.classList.toggle('hidden', !show.marks);
@@ -1156,9 +1295,13 @@ function buildBurnDominoTile(tile, { highlightCount = false, mode = MODES.TRUMPS
   wrap.className = `burnDominoTile${highlightCount ? ' countTile' : ''}`;
   const canvasEl = document.createElement('canvas');
   canvasEl.className = 'burnDominoCanvas';
-  canvasEl.width = 124;
-  canvasEl.height = 220;
+  canvasEl.width = 88;
+  canvasEl.height = 156;
   const ctx = canvasEl.getContext('2d');
+  const scaleX = canvasEl.width / 124;
+  const scaleY = canvasEl.height / 220;
+  ctx.save();
+  ctx.scale(scaleX, scaleY);
 
   const pattern = ctx.createPattern(ivoryPatternCanvas, 'repeat');
   ctx.fillStyle = pattern || '#eee1ca';
@@ -1187,6 +1330,7 @@ function buildBurnDominoTile(tile, { highlightCount = false, mode = MODES.TRUMPS
   const bottomColor = mode === MODES.TRUMPS && trumpSuit != null && tile.b === trumpSuit ? '#cf3df6' : '#151311';
   drawBurnPipsHalf(ctx, tile.a, 62, 56, topColor);
   drawBurnPipsHalf(ctx, tile.b, 62, 165, bottomColor);
+  ctx.restore();
 
   wrap.appendChild(canvasEl);
   return wrap;
@@ -1196,10 +1340,7 @@ function teamCaptainSeat(team) {
   return team === 'teamA' ? 0 : 1;
 }
 
-function lastContributorForTeam(team) {
-  const seatIndex = Number.isInteger(roomState?.lastBurnContributor?.[team])
-    ? roomState.lastBurnContributor[team]
-    : teamCaptainSeat(team);
+function contributorForSeat(seatIndex, team) {
   const seat = roomState?.seats?.[seatIndex];
   if (!seat) {
     return {
@@ -1214,32 +1355,72 @@ function lastContributorForTeam(team) {
   };
 }
 
+function lastContributorForTeam(team, handRecord = null) {
+  const fallbackSeat = Number.isInteger(roomState?.lastBurnContributor?.[team])
+    ? roomState.lastBurnContributor[team]
+    : teamCaptainSeat(team);
+  const seatIndex = Number.isInteger(handRecord?.winnerSeat) ? handRecord.winnerSeat : fallbackSeat;
+  return contributorForSeat(seatIndex, team);
+}
+
 function renderBurnPanel(team, data) {
   const panel = burnPanelDom[team];
   if (!panel) return;
 
   const titleTeam = team === 'teamA' ? 'TEAM 1 BURN PILE' : 'TEAM 2 BURN PILE';
-  const tiles = data.tiles || [];
-  const totalCountPoints = tiles.reduce((sum, tile) => sum + countTilePoints(tile), 0);
+  const handRecords = Array.isArray(data.handRecords) ? data.handRecords : [];
+  const activeHandTiles = Array.isArray(data.currentTiles) ? data.currentTiles : [];
+  const totalTiles = handRecords.reduce((sum, record) => sum + (record.tiles?.length || 0), 0) + activeHandTiles.length;
+  const totalCountPoints = handRecords.reduce((sum, record) => sum + Number(record.countPoints || 0), 0)
+    + activeHandTiles.reduce((sum, tile) => sum + countTilePoints(tile), 0);
   const handWins = Number(data.handWins || 0);
   panel.title.textContent = titleTeam;
-  panel.stats.textContent = `Tiles: ${tiles.length} | Count pts: ${totalCountPoints} | Hand: ${handWins}`;
+  panel.stats.textContent = `Tiles: ${totalTiles} | Count pts: ${totalCountPoints} | Hand: ${handWins}`;
 
-  panel.row.replaceChildren();
-  const maxTiles = 7;
-  const visible = tiles.slice(-maxTiles);
-  for (const tile of visible) {
-    panel.row.appendChild(buildBurnDominoTile(tile, {
-      highlightCount: countTilePoints(tile) > 0,
-      mode: data.mode,
-      trumpSuit: data.trumpSuit
-    }));
+  panel.stack.replaceChildren();
+  if (!handRecords.length) {
+    const empty = document.createElement('div');
+    empty.className = 'burnHandRow';
+    empty.innerHTML = '<div class="burnHandHeader"><span>No completed hands yet</span><span class="burnHandPts">+0 pts</span></div>';
+    panel.stack.appendChild(empty);
+  } else {
+    for (const record of handRecords) {
+      const row = document.createElement('div');
+      row.className = 'burnHandRow';
+
+      const header = document.createElement('div');
+      header.className = 'burnHandHeader';
+      const handLabel = document.createElement('span');
+      handLabel.textContent = `HAND #${Number(record.handIndex || 0)}`;
+      const ptsLabel = document.createElement('span');
+      ptsLabel.className = 'burnHandPts';
+      ptsLabel.textContent = `+${Number(record.countPoints || 0)} pts`;
+      header.append(handLabel, ptsLabel);
+
+      const tilesRow = document.createElement('div');
+      tilesRow.className = 'burnHandTilesRow';
+      const rowTiles = (record.tiles || []).slice(0, 4);
+      for (const tile of rowTiles) {
+        tilesRow.appendChild(buildBurnDominoTile(tile, {
+          highlightCount: countTilePoints(tile) > 0,
+          mode: data.mode,
+          trumpSuit: data.trumpSuit
+        }));
+      }
+      const overflow = Math.max(0, (record.tiles || []).length - rowTiles.length);
+      if (overflow > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'burnOverflowBadge';
+        badge.textContent = `+${overflow}`;
+        tilesRow.appendChild(badge);
+      }
+
+      row.append(header, tilesRow);
+      panel.stack.appendChild(row);
+    }
   }
 
-  const overflow = Math.max(0, tiles.length - visible.length);
-  panel.overflow.textContent = overflow > 0 ? `+${overflow} older tiles` : '';
-
-  const contributor = lastContributorForTeam(team);
+  const contributor = lastContributorForTeam(team, handRecords[0]);
   panel.footer.innerHTML = `
     <div class="burnFooterName">${contributor.name}</div>
     <div class="burnFooterMeta">${contributor.meta}</div>
@@ -1248,19 +1429,21 @@ function renderBurnPanel(team, data) {
 
 function updateBurnPanels() {
   if (!roomState) {
-    renderBurnPanel('teamA', { tiles: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
-    renderBurnPanel('teamB', { tiles: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
+    renderBurnPanel('teamA', { handRecords: [], currentTiles: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
+    renderBurnPanel('teamB', { handRecords: [], currentTiles: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
     return;
   }
 
   renderBurnPanel('teamA', {
-    tiles: roomState.burnPiles?.teamA || [],
+    handRecords: roomState.burnHandsTeamA || [],
+    currentTiles: roomState.burnPiles?.teamA || [],
     handWins: roomState.roundWins?.teamA || 0,
     mode: roomState.mode || MODES.TRUMPS,
     trumpSuit: roomState.trumpSuit
   });
   renderBurnPanel('teamB', {
-    tiles: roomState.burnPiles?.teamB || [],
+    handRecords: roomState.burnHandsTeamB || [],
+    currentTiles: roomState.burnPiles?.teamB || [],
     handWins: roomState.roundWins?.teamB || 0,
     mode: roomState.mode || MODES.TRUMPS,
     trumpSuit: roomState.trumpSuit
@@ -1380,10 +1563,27 @@ function getDominoTexture(tile, options = {}) {
   return tex;
 }
 
+function getDominoBaseMaterial({ faceUp, map = null } = {}) {
+  return new THREE.MeshStandardMaterial({
+    map: map || null,
+    color: faceUp ? 0xf4efe4 : 0xe5dece,
+    metalness: 0.0,
+    roughness: faceUp ? 0.43 : 0.5
+  });
+}
+
+function getDominoPipMaterial(faceUp) {
+  return new THREE.MeshStandardMaterial({
+    color: faceUp ? 0xd9cebb : 0x2c3948,
+    roughness: faceUp ? 0.46 : 0.72,
+    metalness: 0.0
+  });
+}
+
 function createDominoMesh(tile, options = {}) {
   const {
     faceUp = true,
-    scale = 1,
+    scale = DOMINO_SCALE,
     glowCount = false,
     trumpSuit = null,
     useMagentaTrump = false
@@ -1403,9 +1603,9 @@ function createDominoMesh(tile, options = {}) {
     trumpSuit: null
   });
 
-  const sideMat = new THREE.MeshStandardMaterial({ color: faceUp ? 0xe9dcc7 : 0x2f3f4d, roughness: 0.57, metalness: 0.0 });
-  const topMat = new THREE.MeshStandardMaterial({ map: topTexture, color: 0xffffff, roughness: 0.55, metalness: 0.0 });
-  const bottomMat = new THREE.MeshStandardMaterial({ map: bottomTexture, roughness: 0.88, metalness: 0.0 });
+  const sideMat = getDominoPipMaterial(faceUp);
+  const topMat = getDominoBaseMaterial({ faceUp: true, map: topTexture });
+  const bottomMat = getDominoBaseMaterial({ faceUp: false, map: bottomTexture });
   const mats = [sideMat, sideMat, topMat, bottomMat, sideMat, sideMat];
 
   const mesh = new THREE.Mesh(dominoGeometry, mats);
@@ -1781,7 +1981,8 @@ async function loadEnvironmentModels() {
     environmentGroup.remove(prevTable);
     clearGroup(prevTable);
   }
-  tableNode.scale.set(1.46, 1, 1.46);
+  tableNode.scale.set(1, 1, 1);
+  tableNode.position.set(0, 0, 0);
   environmentGroup.add(tableNode);
   updateTableMetricsFromObject(tableNode);
 
@@ -1789,25 +1990,45 @@ async function loadEnvironmentModels() {
     setChairModelForSeat(seat, environmentTemplates.chair);
   }
 
-  updateSeatTransforms();
+  applySceneTuning({ rerenderHand: false });
   resetViewForLocalSeat(false);
 }
 
 function updateSeatTransforms() {
+  sanitizeSceneTuning();
   const localSeat = getLocalSeat();
   for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
     const rel = toRelativeSeat(seatIndex, localSeat);
     const seatConfig = SEATS[rel];
+    const seatDir = tmpV3A.set(seatConfig.chair.pos[0], 0, seatConfig.chair.pos[2]);
+    if (seatDir.lengthSq() < 0.0001) {
+      seatDir.set(0, 0, 1);
+    } else {
+      seatDir.normalize();
+    }
 
     const chairGroup = chairSeatGroups[seatIndex];
-    chairGroup.position.set(...seatConfig.chair.pos);
+    chairGroup.scale.setScalar(sceneTuning.chairScale);
+    chairGroup.position.set(
+      seatDir.x * sceneTuning.seatRadius,
+      seatConfig.chair.pos[1] + sceneTuning.chairY,
+      seatDir.z * sceneTuning.seatRadius
+    );
     chairGroup.rotation.y = seatConfig.chair.rotY;
 
     const avatarGroup = avatarSeatGroups[seatIndex];
-    let avatarBaseY = seatConfig.avatar.pos[1] + seatRuntime[seatIndex].chairSeatY + 0.02;
+    avatarGroup.scale.setScalar(sceneTuning.avatarScale);
+    const avatarRadius = Math.max(0.4, sceneTuning.seatRadius - 0.18 + sceneTuning.avatarBack);
+    let avatarBaseY = (
+      seatConfig.avatar.pos[1]
+      + sceneTuning.chairY
+      + (seatRuntime[seatIndex].chairSeatY * sceneTuning.chairScale)
+      + 0.02
+      + sceneTuning.avatarY
+    );
     avatarBaseY = Math.min(avatarBaseY, tableMetrics.topY - 0.28);
     avatarBaseY = clampAvatarBaseY(avatarBaseY, seatIndex);
-    avatarGroup.position.set(seatConfig.avatar.pos[0], avatarBaseY, seatConfig.avatar.pos[2]);
+    avatarGroup.position.set(seatDir.x * avatarRadius, avatarBaseY, seatDir.z * avatarRadius);
     if (avatarBaseY >= tableMetrics.topY - 0.11) {
       avatarGroup.position.x *= 1.18;
       avatarGroup.position.z *= 1.18;
@@ -1826,21 +2047,23 @@ function clampValue(value, min, max) {
 
 function lookAtBounds() {
   return {
-    min: Number((tableMetrics.topY - 0.2).toFixed(2)),
-    max: Number((tableMetrics.topY + 0.6).toFixed(2))
+    min: 0.2,
+    max: 3.0
   };
 }
 
 function sanitizeViewSettings() {
   const lookBounds = lookAtBounds();
-  viewSettings.distance = clampValue(Number(viewSettings.distance), 0.4, 2.5);
-  viewSettings.height = clampValue(Number(viewSettings.height), 0.7, 2.0);
-  viewSettings.forward = clampValue(Number(viewSettings.forward), -0.6, 0.6);
-  viewSettings.shoulder = clampValue(Number(viewSettings.shoulder), -0.6, 0.6);
+  viewSettings.distance = clampValue(Number(viewSettings.distance), 0.25, 4.5);
+  viewSettings.height = clampValue(Number(viewSettings.height), 0.4, 3.0);
+  viewSettings.forward = clampValue(Number(viewSettings.forward), -1.5, 1.5);
+  viewSettings.shoulder = clampValue(Number(viewSettings.shoulder), -1.25, 1.25);
   viewSettings.lookAtY = clampValue(Number(viewSettings.lookAtY), lookBounds.min, lookBounds.max);
-  viewSettings.fov = clampValue(Number(viewSettings.fov), 35, 85);
-  viewSettings.pitchDeg = clampValue(Number(viewSettings.pitchDeg), -20, 20);
-  viewSettings.near = clampValue(Number(viewSettings.near), 0.01, 0.2);
+  viewSettings.fov = clampValue(Number(viewSettings.fov), 25, 100);
+  viewSettings.pitchDeg = clampValue(Number(viewSettings.pitchDeg), -45, 45);
+  viewSettings.near = clampValue(Number(viewSettings.near), 0.005, 0.5);
+  viewSettings.handY = clampValue(Number(viewSettings.handY), -0.2, 0.4);
+  viewSettings.handZ = clampValue(Number(viewSettings.handZ), -1.0, 1.0);
 }
 
 function updateViewControlsUi() {
@@ -1858,8 +2081,51 @@ function updateViewControlsUi() {
       ? `${Math.round(viewSettings[key])}`
       : key === 'pitchDeg'
         ? `${viewSettings[key].toFixed(1)}`
+        : key === 'near'
+          ? `${viewSettings[key].toFixed(3)}`
         : viewSettings[key].toFixed(2);
   }
+}
+
+function sanitizeSceneTuning() {
+  sceneTuning.tableScale = clampValue(Number(sceneTuning.tableScale), 0.5, 2.5);
+  sceneTuning.chairScale = clampValue(Number(sceneTuning.chairScale), 0.5, 2.5);
+  sceneTuning.avatarScale = clampValue(Number(sceneTuning.avatarScale), 0.5, 2.5);
+  sceneTuning.seatRadius = clampValue(Number(sceneTuning.seatRadius), 1.0, 5.0);
+  sceneTuning.avatarBack = clampValue(Number(sceneTuning.avatarBack), -1.0, 1.0);
+  sceneTuning.avatarY = clampValue(Number(sceneTuning.avatarY), -0.5, 0.5);
+  sceneTuning.chairY = clampValue(Number(sceneTuning.chairY), -0.5, 0.5);
+  sceneTuning.tableY = clampValue(Number(sceneTuning.tableY), -0.5, 0.5);
+}
+
+function updateSceneTuningUi() {
+  sanitizeSceneTuning();
+  for (const key of Object.keys(sceneTuneInputs)) {
+    const input = sceneTuneInputs[key];
+    const label = sceneTuneLabels[key];
+    if (!input || !label) continue;
+    input.value = `${sceneTuning[key]}`;
+    label.textContent = sceneTuning[key].toFixed(2);
+  }
+}
+
+function applySceneTuning({ rerenderHand = true } = {}) {
+  sanitizeSceneTuning();
+
+  const tableNode = environmentGroup.getObjectByName('tableModel');
+  if (tableNode) {
+    tableNode.scale.set(sceneTuning.tableScale, sceneTuning.tableScale, sceneTuning.tableScale);
+    tableNode.position.y = sceneTuning.tableY;
+    updateTableMetricsFromObject(tableNode);
+  }
+
+  updateSeatTransforms();
+  safeApplyViewSettings(true);
+  if (rerenderHand && roomState) {
+    renderHandsAndTrick();
+  }
+  updateNameplatePositions();
+  updatePenaltyEmojiPositions();
 }
 
 function computeSeatedCameraPose(seatIndex, settings) {
@@ -1899,7 +2165,7 @@ function computeSeatedCameraPose(seatIndex, settings) {
   target.copy(pos).addScaledVector(dir, lookDistance);
 
   const radial = Math.hypot(pos.x, pos.z);
-  const safeRadius = Math.max(2.4, tableMetrics.radius + 1.12);
+  const safeRadius = Math.max(1.35, tableMetrics.radius + 0.35);
   if (radial < safeRadius) {
     const outX = radial <= 0.0001 ? 0 : pos.x / radial;
     const outZ = radial <= 0.0001 ? 1 : pos.z / radial;
@@ -1930,8 +2196,8 @@ function setDefaultSeatedCamera() {
   camera.updateProjectionMatrix();
   controls.minPolarAngle = 1.02;
   controls.maxPolarAngle = 1.54;
-  controls.minDistance = Math.max(3.8, tableMetrics.radius + 1.02);
-  controls.maxDistance = Math.max(6.8, tableMetrics.radius + 3.8);
+  controls.minDistance = Math.max(1.2, tableMetrics.radius - 1.4);
+  controls.maxDistance = Math.max(10.5, tableMetrics.radius + 7.5);
   controls.update();
 }
 
@@ -1947,8 +2213,8 @@ function applyViewSettings(immediate = true) {
 
   controls.minPolarAngle = 1.02;
   controls.maxPolarAngle = 1.54;
-  controls.minDistance = Math.max(3.8, tableMetrics.radius + 1.02);
-  controls.maxDistance = Math.max(6.8, tableMetrics.radius + 3.8);
+  controls.minDistance = Math.max(1.2, tableMetrics.radius - 1.4);
+  controls.maxDistance = Math.max(10.5, tableMetrics.radius + 7.5);
 
   if (immediate) {
     camera.position.copy(pose.position);
@@ -1984,16 +2250,20 @@ function resetViewSettingsToDefault() {
   persistViewSettings();
   updateViewControlsUi();
   safeApplyViewSettings(true);
+  renderHandsAndTrick();
+  updateNameplatePositions();
 }
 
 function getSeatHeadWorld(seatIndex, out = new THREE.Vector3()) {
   const avatarGroup = avatarSeatGroups[seatIndex];
   if (!avatarGroup || !avatarGroup.children.length) {
-    const localSeat = getLocalSeat();
-    const rel = toRelativeSeat(seatIndex, localSeat);
-    const fallback = SEATS[rel]?.nameplateAnchor?.pos || [0, 1.9, 0];
-    out.set(fallback[0], fallback[1], fallback[2]);
-    tableRoot.localToWorld(out);
+    if (avatarGroup) {
+      avatarGroup.getWorldPosition(out);
+      out.y += 1.62 * sceneTuning.avatarScale;
+    } else {
+      out.set(0, 1.9, 0);
+      tableRoot.localToWorld(out);
+    }
     return out;
   }
 
@@ -2275,10 +2545,156 @@ function renderAvatars() {
   }
 }
 
+function getSeatBasisForHandLayout(seatIndex) {
+  const safeSeat = Number.isInteger(seatIndex) ? seatIndex : 0;
+  const chairGroup = chairSeatGroups[safeSeat];
+  const avatarGroup = avatarSeatGroups[safeSeat];
+
+  const chairWorld = new THREE.Vector3();
+  if (chairGroup) {
+    chairGroup.getWorldPosition(chairWorld);
+  } else {
+    chairWorld.set(0, 0, sceneTuning.seatRadius);
+    tableRoot.localToWorld(chairWorld);
+  }
+  const tableCenter = new THREE.Vector3(0, tableMetrics.topY, 0);
+  tableRoot.localToWorld(tableCenter);
+
+  const forward = tableCenter.clone().sub(chairWorld);
+  forward.y = 0;
+  if (forward.lengthSq() < 0.0001) {
+    forward.set(0, 0, -1);
+  } else {
+    forward.normalize();
+  }
+
+  const up = new THREE.Vector3(0, 1, 0);
+  const right = new THREE.Vector3().crossVectors(forward, up).normalize();
+
+  const fallbackBase = new THREE.Vector3();
+  if (avatarGroup) {
+    avatarGroup.getWorldPosition(fallbackBase);
+  } else {
+    fallbackBase.copy(chairWorld);
+  }
+  fallbackBase.addScaledVector(forward, 0.58);
+  fallbackBase.y = tableMetrics.topY + 0.05;
+
+  return { base: fallbackBase, forward, right, up };
+}
+
+function layoutPlayerHandDominos(seatId, dominos, settings) {
+  localHandScreenBounds.valid = false;
+  if (!dominos?.length) return;
+
+  const basis = getSeatBasisForHandLayout(seatId);
+  if (!basis) return;
+
+  let base = basis.base
+    .clone()
+    .addScaledVector(basis.up, Number(settings.handY) || 0)
+    .addScaledVector(basis.forward, -(Number(settings.handZ) || 0));
+
+  base.y = Math.max(base.y, tableMetrics.topY + 0.03);
+
+  const n = dominos.length;
+  const totalWidth = clampValue(n * 0.19, 1.0, 2.1);
+  let spacing = n > 1 ? totalWidth / (n - 1) : 0;
+  let arcStrength = 0.16;
+  const liftY = 0.024;
+  const pitch = THREE.MathUtils.degToRad(16);
+  const baseRot = Math.atan2(basis.right.z, basis.right.x);
+  const meshes = [];
+
+  for (const tile of dominos) {
+    const mesh = createDominoMesh(tile, {
+      faceUp: true,
+      glowCount: countTilePoints(tile) > 0,
+      scale: DOMINO_SCALE
+    });
+    mesh.userData.tileId = tile.id;
+    mesh.userData.seatIndex = seatId;
+    mesh.userData.clickable = true;
+    handGroup.add(mesh);
+    meshes.push(mesh);
+  }
+
+  const screenBounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  const sample = { x: 0, y: 0 };
+
+  const placeMeshes = () => {
+    for (let i = 0; i < meshes.length; i += 1) {
+      const mesh = meshes[i];
+      const t = n <= 1 ? 0 : i - (n - 1) / 2;
+      const x = t * spacing;
+      const yArc = -(x * x) * arcStrength;
+      mesh.position.copy(base)
+        .addScaledVector(basis.right, x)
+        .addScaledVector(basis.forward, yArc)
+        .addScaledVector(basis.up, liftY);
+      mesh.rotation.set(0, baseRot, 0);
+      mesh.rotateX(pitch);
+      mesh.rotateY(t * 0.024);
+      mesh.userData.baseY = mesh.position.y;
+      mesh.updateMatrixWorld(true);
+    }
+  };
+
+  const measureBounds = () => {
+    screenBounds.minX = Infinity;
+    screenBounds.minY = Infinity;
+    screenBounds.maxX = -Infinity;
+    screenBounds.maxY = -Infinity;
+    for (const mesh of meshes) {
+      tmpV3E.setFromMatrixPosition(mesh.matrixWorld);
+      projectWorldToScreen(tmpV3E, sample);
+      screenBounds.minX = Math.min(screenBounds.minX, sample.x - 34);
+      screenBounds.maxX = Math.max(screenBounds.maxX, sample.x + 34);
+      screenBounds.minY = Math.min(screenBounds.minY, sample.y - 24);
+      screenBounds.maxY = Math.max(screenBounds.maxY, sample.y + 24);
+    }
+  };
+
+  for (let i = 0; i < 8; i += 1) {
+    placeMeshes();
+    measureBounds();
+    const overflowX = screenBounds.minX < 24 || screenBounds.maxX > window.innerWidth - 24;
+    const overflowBottom = screenBounds.maxY > window.innerHeight - 70;
+    const overflowTop = screenBounds.minY < 62;
+    if (!overflowX && !overflowBottom && !overflowTop) break;
+
+    if (overflowX) {
+      spacing = Math.max(0.12, spacing * 0.9);
+      arcStrength = Math.max(0.1, arcStrength * 0.94);
+    }
+    if (overflowBottom) {
+      base.addScaledVector(basis.forward, 0.08);
+      base.y += 0.008;
+    } else if (overflowTop) {
+      base.addScaledVector(basis.forward, -0.07);
+    }
+  }
+
+  const minCamDistance = 0.85;
+  const distToCam = camera.position.distanceTo(base);
+  if (distToCam < minCamDistance) {
+    base.addScaledVector(basis.forward, minCamDistance - distToCam + 0.12);
+    placeMeshes();
+    measureBounds();
+  }
+
+  localHandScreenBounds.valid = Number.isFinite(screenBounds.minX);
+  localHandScreenBounds.minX = screenBounds.minX;
+  localHandScreenBounds.maxX = screenBounds.maxX;
+  localHandScreenBounds.minY = screenBounds.minY;
+  localHandScreenBounds.maxY = screenBounds.maxY;
+}
+
 function renderHandsAndTrick() {
   clearGroup(handGroup);
   clearGroup(oppHandGroup);
   clearGroup(trickGroup);
+  localHandScreenBounds.valid = false;
 
   if (!roomState) return;
 
@@ -2289,44 +2705,25 @@ function renderHandsAndTrick() {
   const myHand = localSeat != null ? roomState.hands?.[localSeat] || [] : [];
 
   if (myHand.length) {
-    const seatAnchor = SEATS[0].handAnchor;
-    const spacing = 1.08;
-    const startOffset = -((myHand.length - 1) * spacing) / 2;
-
-    myHand.forEach((tile, index) => {
-      const mesh = createDominoMesh(tile, {
-        faceUp: true,
-        glowCount: countTilePoints(tile) > 0,
-        scale: 1.09
-      });
-      const t = myHand.length <= 1 ? 0 : (index / (myHand.length - 1)) * 2 - 1;
-      const arcLift = Math.abs(t) * 0.012;
-      const arcForward = Math.abs(t) * 0.2;
-      mesh.position.set(
-        seatAnchor.pos[0] + startOffset + index * spacing,
-        DOMINO_Y + 0.055 + arcLift,
-        seatAnchor.pos[2] - 0.06 + arcForward
-      );
-      mesh.rotation.y = seatAnchor.rotY + t * 0.14;
-      mesh.userData.tileId = tile.id;
-      mesh.userData.seatIndex = localSeat;
-      mesh.userData.clickable = true;
-      mesh.userData.baseY = mesh.position.y;
-      handGroup.add(mesh);
-    });
+    layoutPlayerHandDominos(localSeat, myHand, viewSettings);
   }
 
   for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
     if (seatIndex === localSeat) continue;
     const count = roomState.handCounts?.[seatIndex] || 0;
-    const rel = toRelativeSeat(seatIndex, localSeat);
-    const seatAnchor = SEATS[rel].handAnchor;
+    const basis = getSeatBasisForHandLayout(seatIndex);
+    const stackBase = basis.base
+      .clone()
+      .addScaledVector(basis.forward, 0.18)
+      .addScaledVector(basis.up, 0.01);
+    const yaw = Math.atan2(basis.right.z, basis.right.x);
 
     for (let i = 0; i < count; i += 1) {
-      const mesh = createDominoMesh({ a: 0, b: 0, id: 'back' }, { faceUp: false });
-      mesh.position.set(seatAnchor.pos[0], DOMINO_Y + i * 0.012, seatAnchor.pos[2] + i * 0.06);
-      mesh.rotation.y = seatAnchor.rotY;
-      mesh.scale.setScalar(0.92);
+      const mesh = createDominoMesh({ a: 0, b: 0, id: 'back' }, { faceUp: false, scale: DOMINO_SCALE });
+      mesh.position.copy(stackBase)
+        .addScaledVector(basis.up, i * 0.008)
+        .addScaledVector(basis.right, (i % 2 === 0 ? -1 : 1) * 0.01);
+      mesh.rotation.y = yaw;
       oppHandGroup.add(mesh);
     }
   }
@@ -2467,6 +2864,10 @@ function setupViewControls() {
       updateViewControlsUi();
       persistViewSettings();
       safeApplyViewSettings(true);
+      if (roomState) {
+        renderHandsAndTrick();
+        updateNameplatePositions();
+      }
     });
   };
 
@@ -2483,11 +2884,60 @@ function setupViewControls() {
       lookAtY: Number(viewSettings.lookAtY),
       fov: Number(viewSettings.fov),
       pitchDeg: Number(viewSettings.pitchDeg),
-      near: Number(viewSettings.near)
+      near: Number(viewSettings.near),
+      handY: Number(viewSettings.handY),
+      handZ: Number(viewSettings.handZ)
     }, null, 2);
     try {
       await navigator.clipboard.writeText(payload);
       logMessage('View settings copied.');
+    } catch {
+      logMessage('Clipboard unavailable.');
+    }
+  });
+}
+
+function setupSceneTuningControls() {
+  const bindSlider = (key) => {
+    const input = sceneTuneInputs[key];
+    if (!input) return;
+    input.addEventListener('input', () => {
+      const value = Number(input.value);
+      if (!Number.isFinite(value)) return;
+      sceneTuning[key] = value;
+      updateSceneTuningUi();
+      persistSceneTuning();
+      applySceneTuning({ rerenderHand: true });
+    });
+  };
+
+  for (const key of Object.keys(sceneTuneInputs)) {
+    bindSlider(key);
+  }
+
+  resetSceneTuningBtn?.addEventListener('click', () => {
+    localStorage.removeItem(SCENE_TUNING_STORAGE_KEY);
+    Object.assign(sceneTuning, DEFAULT_SCENE_TUNING);
+    updateSceneTuningUi();
+    persistSceneTuning();
+    applySceneTuning({ rerenderHand: true });
+    logMessage('Scene tuning reset.');
+  });
+
+  copySceneTuningBtn?.addEventListener('click', async () => {
+    const payload = JSON.stringify({
+      tableScale: Number(sceneTuning.tableScale),
+      chairScale: Number(sceneTuning.chairScale),
+      avatarScale: Number(sceneTuning.avatarScale),
+      seatRadius: Number(sceneTuning.seatRadius),
+      avatarBack: Number(sceneTuning.avatarBack),
+      avatarY: Number(sceneTuning.avatarY),
+      chairY: Number(sceneTuning.chairY),
+      tableY: Number(sceneTuning.tableY)
+    }, null, 2);
+    try {
+      await navigator.clipboard.writeText(payload);
+      logMessage('Scene tuning copied.');
     } catch {
       logMessage('Clipboard unavailable.');
     }
@@ -3415,7 +3865,11 @@ function onResize() {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   safeApplyViewSettings(false);
+  if (roomState) {
+    renderHandsAndTrick();
+  }
   controls.update();
+  updateNameplatePositions();
   updatePenaltyEmojiPositions();
 }
 
@@ -3529,8 +3983,11 @@ runBootStep('ensureButtons', ensureButtons);
 runBootStep('connect', connect);
 
 runBootStep('loadStoredViewSettings', loadStoredViewSettings);
+runBootStep('loadStoredSceneTuning', loadStoredSceneTuning);
 runBootStep('updateViewControlsUi', updateViewControlsUi);
+runBootStep('updateSceneTuningUi', updateSceneTuningUi);
 runBootStep('setupViewControls', setupViewControls);
+runBootStep('setupSceneTuningControls', setupSceneTuningControls);
 runBootStep('addPointerInteraction', addPointerInteraction);
 runBootStep('showSections', showSections);
 runBootStep('setPanelOpen', () => setPanelOpen(true));
