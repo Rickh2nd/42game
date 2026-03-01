@@ -7,7 +7,7 @@ const STATUS_DISCONNECTED = 'disconnected';
 const statusListeners = new Set();
 
 const SOCKET_URL = resolveSocketUrl();
-const SOCKET_PATH = resolveSocketPath();
+const SOCKET_PATH = '/socket.io';
 
 let socketInstance = null;
 let currentStatus = STATUS_CONNECTING;
@@ -64,12 +64,6 @@ function resolveSocketUrl() {
   return '/';
 }
 
-function resolveSocketPath() {
-  const envPath = safeReadEnv('VITE_SOCKET_PATH') || safeReadEnv('SOCKET_PATH');
-  if (!envPath) return '/socket.io';
-  return envPath.startsWith('/') ? envPath : `/${envPath}`;
-}
-
 function getTransportName() {
   return socketInstance?.io?.engine?.transport?.name || null;
 }
@@ -122,8 +116,8 @@ function ensureSocket() {
 
   socketInstance = io(SOCKET_URL, {
     path: SOCKET_PATH,
-    transports: ['websocket', 'polling'],
-    withCredentials: true,
+    transports: ['polling', 'websocket'],
+    withCredentials: false,
     autoConnect: true,
     reconnection: true,
     reconnectionAttempts: Infinity,
