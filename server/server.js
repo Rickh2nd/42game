@@ -53,16 +53,40 @@ const FALLBACK_ENVIRONMENT_IDS = [
   'modern_office',
   'viking_longhouse'
 ];
+const SOCKET_PATH = '/socket.io';
 
 const app = express();
+app.get('/health', (_req, res) => {
+  res.json({ ok: true, now: Date.now() });
+});
+app.get('/socket-health', (_req, res) => {
+  res.type('text/plain').send('socket ok');
+});
+
+const httpServer = http.createServer(app);
+const io = new SocketIOServer(httpServer, {
+  path: SOCKET_PATH,
+  cors: {
+    origin: true,
+    methods: ['GET', 'POST'],
+    credentials: false
+  },
+  transports: ['polling', 'websocket'],
+  allowEIO3: true
+});
+
+io.engine.on('connection_error', (err) => {
+  console.error('[engine] connection_error', {
+    code: err?.code,
+    message: err?.message,
+    context: err?.context
+  });
+});
+
 app.use('/assets', express.static(path.join(ROOT_DIR, 'client', 'assets'), { fallthrough: false }));
 app.use(express.static(path.join(ROOT_DIR, 'client')));
 app.use('/shared', express.static(path.join(ROOT_DIR, 'shared')));
 app.use('/node_modules', express.static(path.join(ROOT_DIR, 'node_modules')));
-
-app.get('/health', (_req, res) => {
-  res.json({ ok: true, now: Date.now() });
-});
 
 app.use((err, req, res, next) => {
   if (req.path.startsWith('/assets/') && (err?.status === 404 || err?.code === 'ENOENT')) {
@@ -72,31 +96,18 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(ROOT_DIR, 'client', 'index.html'));
-});
-
-const httpServer = http.createServer(app);
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
-  .split(',')
-  .map((value) => value.trim())
-  .filter(Boolean);
-const io = new SocketIOServer(httpServer, {
-  cors: {
-    origin(origin, callback) {
-      if (!origin) {
-        callback(null, true);
-        return;
-      }
-      if (!allowedOrigins.length || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-      callback(new Error('Origin not allowed by CORS'));
-    },
-    methods: ['GET', 'POST'],
-    credentials: true
+app.get('*', (req, res, next) => {
+  const url = req.originalUrl || '';
+  if (
+    url.startsWith('/socket.io') ||
+    url.startsWith('/api') ||
+    url.startsWith('/health') ||
+    url.startsWith('/socket-health')
+  ) {
+    next();
+    return;
   }
+  res.sendFile(path.join(ROOT_DIR, 'client', 'index.html'));
 });
 
 const rooms = new Map();
@@ -1557,6 +1568,11 @@ function handleClientHello(socket, payload = {}) {
 
 io.on('connection', (socket) => {
   const clientId = attachSocketToClient(socket);
+  console.log('[socket] connected', {
+    id: socket.id,
+    origin: socket.handshake?.headers?.origin || null,
+    transport: socket.conn?.transport?.name || null
+  });
   syncIdentityAndState(clientId);
 
   socket.on('client:hello', (payload) => {
@@ -1575,7 +1591,14 @@ io.on('connection', (socket) => {
     handleAction(resolvedClientId, action, data.payload || {});
   });
 
-  socket.on('disconnect', () => {
+  socket.on('debug:ping', (payload, ack) => {
+    if (typeof ack === 'function') {
+      ack({ ok: true, serverTime: Date.now(), payload: payload ?? null });
+    }
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log('[socket] disconnected', { id: socket.id, reason: reason || 'unknown' });
     const resolvedClientId = socketToClientId.get(socket.id);
     if (!resolvedClientId) return;
 
@@ -1590,8 +1613,9 @@ io.on('connection', (socket) => {
   });
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`Texas 42 server listening on http://localhost:${PORT}`);
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log('[server] listening', PORT);
+  console.log('[server] socket path', SOCKET_PATH);
 });
 
 setInterval(() => {

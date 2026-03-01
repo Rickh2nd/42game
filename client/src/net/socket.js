@@ -3,6 +3,7 @@ import { io } from '/node_modules/socket.io-client/dist/socket.io.esm.min.js';
 const STATUS_CONNECTING = 'connecting';
 const STATUS_CONNECTED = 'connected';
 const STATUS_DISCONNECTED = 'disconnected';
+const SOCKET_PATH = '/socket.io';
 
 const statusListeners = new Set();
 const SOCKET_URL = resolveSocketUrl();
@@ -66,6 +67,7 @@ function notifyStatus(force = false) {
   const payload = {
     status: currentStatus,
     socketUrl: SOCKET_URL,
+    socketPath: SOCKET_PATH,
     lastError,
     connected: !!socketInstance?.connected
   };
@@ -109,7 +111,9 @@ function ensureSocket() {
   }
 
   socketInstance = io(SOCKET_URL, {
-    transports: ['websocket'],
+    path: SOCKET_PATH,
+    transports: ['polling', 'websocket'],
+    withCredentials: false,
     autoConnect: true,
     reconnection: true,
     reconnectionAttempts: Infinity,
@@ -121,21 +125,24 @@ function ensureSocket() {
   setStatus(STATUS_CONNECTING, { force: true });
 
   socketInstance.on('connect', () => {
+    console.log('[socket] connected', socketInstance.id);
     setStatus(STATUS_CONNECTED, { error: null });
   });
 
   socketInstance.on('disconnect', (reason) => {
+    console.log('[socket] disconnect', reason);
     setStatus(STATUS_DISCONNECTED, { error: reason || 'disconnect' });
   });
 
   socketInstance.on('connect_error', (error) => {
     const message = error?.message || 'unknown error';
-    console.warn(`socket connect_error: ${message} ${SOCKET_URL}`);
+    console.log('[socket] connect_error', message);
     setStatus(STATUS_DISCONNECTED, { error: message });
   });
 
   if (socketInstance.io) {
-    socketInstance.io.on('reconnect_attempt', () => {
+    socketInstance.io.on('reconnect_attempt', (attempt) => {
+      console.log('[socket] reconnect_attempt', attempt);
       setStatus(STATUS_CONNECTING, { error: null });
     });
 
@@ -164,6 +171,7 @@ export function onStatusChange(cb) {
   cb({
     status: currentStatus,
     socketUrl: SOCKET_URL,
+    socketPath: SOCKET_PATH,
     lastError,
     connected: !!socketInstance?.connected
   }, { force: true });
