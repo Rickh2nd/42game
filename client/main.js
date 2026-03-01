@@ -3107,13 +3107,22 @@ function ensureButtons() {
     }
   });
 
-  document.getElementById('joinRoomBtn').addEventListener('click', () => {
+  document.getElementById('joinRoomBtn').addEventListener('click', async () => {
+    if (!socket.connected) {
+      logMessage('Not connected to server.', 1800);
+      return;
+    }
     const roomId = roomIdInput.value.trim();
     if (!roomId) {
       logMessage('Enter room ID first.');
       return;
     }
-    sendAction('joinRoom', { roomId });
+    const ack = await emitWithAckTimeout('room:join', { roomId }, 3000);
+    if (!ack?.ok) {
+      logMessage(ack?.message || 'Join failed.', 2500);
+      return;
+    }
+    logMessage(`Joined room ${ack.roomId || roomId}`, 1800);
   });
 
   document.getElementById('leaveRoomBtn').addEventListener('click', () => {

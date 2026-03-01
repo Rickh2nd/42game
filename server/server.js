@@ -1436,20 +1436,10 @@ function handleAction(clientId, action, payload) {
   }
 
   if (action === 'joinRoom') {
-    const roomId = normalizeRoomId(payload?.roomId);
-    const room = rooms.get(roomId);
-    if (!room) {
-      sendError(clientId, action, 'Room not found.');
-      return;
+    const result = joinRoomForClient(clientId, payload);
+    if (!result.ok) {
+      sendError(clientId, action, result.message || 'Unable to join room.');
     }
-
-    if (client.roomId && client.roomId !== roomId) {
-      removeClientFromRoom(clientId, 'switch-room');
-    }
-
-    room.clientIds.add(clientId);
-    client.roomId = roomId;
-    broadcastRoom(room);
     return;
   }
 
@@ -1497,6 +1487,28 @@ function createRoomForClient(clientId, payload) {
     type: 'roomCreated',
     roomId
   });
+  broadcastRoom(room);
+  return { ok: true, roomId };
+}
+
+function joinRoomForClient(clientId, payload) {
+  const client = clients.get(clientId);
+  if (!client) {
+    return { ok: false, message: 'Client not found.' };
+  }
+
+  const roomId = normalizeRoomId(payload?.roomId);
+  const room = rooms.get(roomId);
+  if (!room) {
+    return { ok: false, message: 'Room not found.' };
+  }
+
+  if (client.roomId && client.roomId !== roomId) {
+    removeClientFromRoom(clientId, 'switch-room');
+  }
+
+  room.clientIds.add(clientId);
+  client.roomId = roomId;
   broadcastRoom(room);
   return { ok: true, roomId };
 }
@@ -1612,6 +1624,20 @@ io.on('connection', (socket) => {
       return;
     }
     const result = createRoomForClient(resolvedClientId, payload || {});
+    if (typeof ack === 'function') {
+      ack(result);
+    }
+  });
+
+  socket.on('room:join', (payload, ack) => {
+    const resolvedClientId = socketToClientId.get(socket.id);
+    if (!resolvedClientId) {
+      if (typeof ack === 'function') {
+        ack({ ok: false, message: 'Client not mapped.' });
+      }
+      return;
+    }
+    const result = joinRoomForClient(resolvedClientId, payload || {});
     if (typeof ack === 'function') {
       ack(result);
     }

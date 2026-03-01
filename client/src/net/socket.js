@@ -1,5 +1,3 @@
-import { io } from '/node_modules/socket.io-client/dist/socket.io.esm.min.js';
-
 const SOCKET_URL = (
   (typeof import.meta !== 'undefined' && import.meta?.env?.VITE_SOCKET_URL)
   || (typeof import.meta !== 'undefined' && import.meta?.env?.REACT_APP_SOCKET_URL)
@@ -21,13 +19,33 @@ export const socketDebug = {
 
 const statusListeners = new Set();
 
-export const socket = io(SOCKET_URL, {
-  path: SOCKET_PATH,
-  transports: ['polling', 'websocket'],
-  autoConnect: true,
-  reconnection: true,
-  timeout: 8000
-});
+const globalIo = typeof window !== 'undefined' ? window.io : null;
+if (typeof globalIo !== 'function') {
+  console.log('[socket] connect_error', 'io is not loaded on window');
+  socketDebug.status = 'disconnected';
+  socketDebug.lastError = 'io is not loaded on window';
+}
+
+export const socket = typeof globalIo === 'function'
+  ? globalIo(SOCKET_URL, {
+      path: SOCKET_PATH,
+      transports: ['polling', 'websocket'],
+      autoConnect: true,
+      reconnection: true,
+      timeout: 8000
+    })
+  : {
+      connected: false,
+      id: '',
+      io: { engine: { transport: { name: '' } } },
+      on() {},
+      emit() {},
+      timeout() {
+        return { emit() {} };
+      },
+      disconnect() {},
+      connect() {}
+    };
 
 function notifyStatus() {
   const info = getSocketInfo();
@@ -70,19 +88,19 @@ socket.on('connect_error', (err) => {
   notifyStatus();
 });
 
-socket.io.on('reconnect_attempt', (attempt) => {
+socket.io?.on?.('reconnect_attempt', (attempt) => {
   socketDebug.status = 'connecting';
   console.log('[socket] reconnect_attempt', attempt);
   notifyStatus();
 });
 
-socket.io.on('reconnect', () => {
+socket.io?.on?.('reconnect', () => {
   socketDebug.status = 'connected';
   socketDebug.lastError = '';
   notifyStatus();
 });
 
-socket.io.on('error', (err) => {
+socket.io?.on?.('error', (err) => {
   socketDebug.lastError = err?.message || String(err);
   notifyStatus();
 });
