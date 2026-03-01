@@ -340,6 +340,9 @@ let networkLastDisconnectReason = '';
 let socketHandlersBound = false;
 let lastDisconnectedToastAt = 0;
 let healthProbeInFlight = false;
+let connectionAttemptStartedAt = 0;
+let lastHelloSentAt = 0;
+let socketMonitorTimer = null;
 localClientId = localStorage.getItem(PLAYER_ID_STORAGE_KEY) || null;
 
 function logMessage(text, timeoutMs = 2600) {
@@ -406,18 +409,13 @@ function updateSocketUi() {
     pingServerBtn.disabled = !connected;
   }
 
-  const connectionOnlyControls = [
-    'createRoomBtn',
-    'joinRoomBtn',
-    'leaveRoomBtn',
-    'startGameBtn',
-    'restartGameBtn',
-    'changeAvatarBtn'
-  ];
-  for (const id of connectionOnlyControls) {
+  const networkActionControls = ['pingServerBtn', 'reconnectNowBtn'];
+  for (const id of networkActionControls) {
     const node = document.getElementById(id);
     if (!node) continue;
-    node.disabled = !connected;
+    if (id === 'pingServerBtn') {
+      node.disabled = !connected;
+    }
   }
 }
 
@@ -2857,6 +2855,7 @@ function resetRoomLocally() {
 }
 
 function sendClientHello() {
+  lastHelloSentAt = Date.now();
   emitSafe('client:hello', {
     clientVersion: CLIENT_VERSION,
     lastKnownGameId: roomState?.roomId || roomIdInput.value.trim() || null,
@@ -2973,6 +2972,7 @@ function connect() {
     return;
   }
   socketHandlersBound = true;
+  connectionAttemptStartedAt = Date.now();
 
   onStatusChange((network) => {
     socketStatus = network.status || 'disconnected';
@@ -2981,6 +2981,12 @@ function connect() {
     socketId = network.socketId || null;
     socketTransport = network.transport || null;
     socketLastError = network.lastError || '';
+    if (network.status === 'connecting' && connectionAttemptStartedAt === 0) {
+      connectionAttemptStartedAt = Date.now();
+    }
+    if (network.status === 'connected') {
+      connectionAttemptStartedAt = 0;
+    }
     if (network.status === 'disconnected' && network.lastError) {
       networkLastDisconnectReason = String(network.lastError);
     }
@@ -3006,6 +3012,7 @@ function connect() {
 
   socket.on('disconnect', (reason) => {
     networkLastDisconnectReason = String(reason || 'disconnect');
+    connectionAttemptStartedAt = Date.now();
     const status = getSocketStatus();
     socketId = status.id;
     socketTransport = status.transport;
@@ -3021,8 +3028,15 @@ function connect() {
   socket.on('connect_error', (error) => {
     const message = String(error?.message || 'connect_error');
     socketLastError = message;
+    connectionAttemptStartedAt = Date.now();
     updateSocketUi();
     logMessage(`Socket error: ${message} (${socketUrl}${socketPath})`, 2600);
+  });
+
+  socket.io?.engine?.on?.('upgrade', () => {
+    const status = getSocketStatus();
+    socketTransport = status.transport;
+    updateSocketUi();
   });
 
   socket.on('packet', (payload) => {
@@ -3056,7 +3070,45 @@ function connect() {
     updateSocketUi();
     sendClientHello();
     runHealthProbe();
+  } else {
+    socket.connect();
   }
+
+  if (socketMonitorTimer) {
+    clearInterval(socketMonitorTimer);
+  }
+  socketMonitorTimer = setInterval(() => {
+    const live = getSocketStatus();
+    socketStatus = live.status || (live.connected ? 'connected' : 'connecting');
+    socketUrl = live.url || socketUrl;
+    socketPath = live.path || socketPath;
+    socketId = live.id || null;
+    socketTransport = live.transport || null;
+    if (live.lastError) {
+      socketLastError = live.lastError;
+    }
+
+    if (live.connected) {
+      if (!lastHelloSentAt || (Date.now() - lastHelloSentAt > 12000)) {
+        sendClientHello();
+      }
+    } else if (socketStatus === 'connecting') {
+      const stuckFor = connectionAttemptStartedAt ? (Date.now() - connectionAttemptStartedAt) : 0;
+      if (stuckFor > 10000) {
+        connectionAttemptStartedAt = Date.now();
+        try {
+          socket.disconnect();
+        } catch {
+          // ignore
+        }
+        socket.connect();
+      }
+    } else if (socketStatus === 'disconnected') {
+      socket.connect();
+    }
+
+    updateSocketUi();
+  }, 1000);
 }
 
 function initHdrEnvironment() {
