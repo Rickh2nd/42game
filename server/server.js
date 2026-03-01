@@ -53,7 +53,7 @@ const FALLBACK_ENVIRONMENT_IDS = [
   'modern_office',
   'viking_longhouse'
 ];
-const SOCKET_PATH = '/socket.io';
+const SOCKET_PATH = process.env.SOCKET_PATH || '/socket.io';
 
 const app = express();
 app.use('/assets', express.static(path.join(ROOT_DIR, 'client', 'assets'), { fallthrough: false }));
@@ -88,16 +88,36 @@ app.get('*', (_req, res) => {
 });
 
 const httpServer = http.createServer(app);
+const allowedOrigins = new Set([
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+  process.env.RENDER_EXTERNAL_URL
+].filter(Boolean));
+for (const extra of (process.env.ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean)) {
+  allowedOrigins.add(extra);
+}
+const normalizeOrigin = (value) => String(value || '').trim().replace(/\/+$/, '');
+const normalizedAllowedOrigins = new Set([...allowedOrigins].map(normalizeOrigin).filter(Boolean));
 const io = new SocketIOServer(httpServer, {
   path: SOCKET_PATH,
-  transports: ['polling', 'websocket'],
+  transports: ['websocket', 'polling'],
   allowEIO3: true,
   cors: {
     origin(origin, callback) {
-      callback(null, true);
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      if (!normalizedAllowedOrigins.size || normalizedAllowedOrigins.has(normalizeOrigin(origin))) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error(`CORS blocked origin: ${origin}`), false);
     },
     methods: ['GET', 'POST'],
-    credentials: false
+    credentials: true
   }
 });
 
@@ -1558,7 +1578,7 @@ function handleClientHello(socket, payload = {}) {
 }
 
 io.engine.on('connection_error', (err) => {
-  console.error('[engine] connection_error', {
+  console.error('[socket] engine connection_error', {
     code: err?.code,
     message: err?.message,
     context: err?.context
@@ -1615,7 +1635,7 @@ io.on('connection', (socket) => {
 
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] listening on ${PORT}`);
-  console.log('[server] allowedOrigins: *');
+  console.log('[server] allowedOrigins:', [...normalizedAllowedOrigins]);
   console.log('[server] socket path:', SOCKET_PATH);
 });
 
