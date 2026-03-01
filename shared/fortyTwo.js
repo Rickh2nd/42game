@@ -360,17 +360,40 @@ export function evaluateHandOutcome(state, config = CONFIG_DEFAULTS) {
 
   const bidderTeam = getTeam(state.bidderSeat);
   const defendingTeam = otherTeam(bidderTeam);
-  const bidderPoints = Number(state.pointsThisHand?.[bidderTeam] || 0);
-  const bidValue = Number(state.bidValue || 30);
-  const success = bidderPoints >= bidValue;
-  const winnerTeam = success ? bidderTeam : defendingTeam;
+  const pointsA = Number(state.pointsThisHand?.teamA || 0);
+  const pointsB = Number(state.pointsThisHand?.teamB || 0);
+  const targetA = Number(state.targetThisHand?.teamA || 0);
+  const targetB = Number(state.targetThisHand?.teamB || 0);
+
+  let winnerTeam = null;
+  if (targetA > 0 && pointsA >= targetA) {
+    winnerTeam = TEAM_A;
+  }
+  if (targetB > 0 && pointsB >= targetB) {
+    if (!winnerTeam) {
+      winnerTeam = TEAM_B;
+    } else {
+      const overA = pointsA - targetA;
+      const overB = pointsB - targetB;
+      winnerTeam = overB > overA ? TEAM_B : TEAM_A;
+    }
+  }
+  if (!winnerTeam) {
+    const bidderPoints = Number(state.pointsThisHand?.[bidderTeam] || 0);
+    const bidValue = Number(state.bidValue || 30);
+    winnerTeam = bidderPoints >= bidValue ? bidderTeam : defendingTeam;
+  }
+
+  const success = winnerTeam === bidderTeam;
 
   return {
     winnerTeam,
     bidderTeam,
     defendingTeam,
     success,
-    reason: success ? 'contractMade' : 'contractSet'
+    reason: success ? 'contractMade' : 'contractSet',
+    points: { teamA: pointsA, teamB: pointsB },
+    target: { teamA: targetA, teamB: targetB }
   };
 }
 

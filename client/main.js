@@ -5,7 +5,7 @@ import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
-import { SEATS, toRelativeSeat } from '/seats.js';
+import { SEATS, toRelativeSeat } from '/src/scene/seats.js';
 
 const MODES = {
   TRUMPS: 'trumps',
@@ -39,7 +39,6 @@ const roomIdInput = document.getElementById('roomIdInput');
 const roomStatus = document.getElementById('roomStatus');
 const eventLog = document.getElementById('eventLog');
 const seatControls = document.getElementById('seatControls');
-const marksText = document.getElementById('marksText');
 const hudBidValue = document.getElementById('hudBidValue');
 const hudTrumpValue = document.getElementById('hudTrumpValue');
 
@@ -60,10 +59,12 @@ const closeAvatarModalBtn = document.getElementById('closeAvatarModalBtn');
 const avatarGrid = document.getElementById('avatarGrid');
 const avatarPickerStatus = document.getElementById('avatarPickerStatus');
 
-const tallyTeamA = document.getElementById('tally-teamA');
-const tallyTeamB = document.getElementById('tally-teamB');
-const pointsTeamA = document.getElementById('points-teamA');
-const pointsTeamB = document.getElementById('points-teamB');
+const scoreTeamAMain = document.getElementById('score-teamA-main');
+const scoreTeamBMain = document.getElementById('score-teamB-main');
+const menuRoundsTeamA = document.getElementById('menu-rounds-teamA');
+const menuRoundsTeamB = document.getElementById('menu-rounds-teamB');
+const menuMarksTeamA = document.getElementById('menu-marks-teamA');
+const menuMarksTeamB = document.getElementById('menu-marks-teamB');
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -90,9 +91,13 @@ const visualsGroup = new THREE.Group();
 visualsGroup.name = 'visualsGroup';
 scene.add(visualsGroup);
 
+const tableRoot = new THREE.Group();
+tableRoot.name = 'tableRoot';
+visualsGroup.add(tableRoot);
+
 const environmentGroup = new THREE.Group();
 environmentGroup.name = 'environmentGroup';
-visualsGroup.add(environmentGroup);
+tableRoot.add(environmentGroup);
 
 const handGroup = new THREE.Group();
 handGroup.name = 'handGroup';
@@ -113,13 +118,13 @@ oppHandGroup.add(burnGroupB);
 
 const chairSeatGroups = [0, 1, 2, 3].map(() => {
   const g = new THREE.Group();
-  environmentGroup.add(g);
+  tableRoot.add(g);
   return g;
 });
 
 const avatarSeatGroups = [0, 1, 2, 3].map(() => {
   const g = new THREE.Group();
-  visualsGroup.add(g);
+  tableRoot.add(g);
   return g;
 });
 
@@ -183,6 +188,24 @@ const environmentTemplates = {
   table: null,
   chair: null
 };
+const tableMetrics = {
+  topY: PLAY_PLANE_Y,
+  floorY: 0
+};
+const seatRuntime = [0, 1, 2, 3].map(() => ({
+  chairSeatY: 0.42
+}));
+const oneShotWarnings = new Set();
+
+const nameplateOffsets = [0, 1, 2, 3].map(() => ({ x: 0, y: 0 }));
+let draggingNameplateSeat = null;
+let draggingPointerId = null;
+let draggingStartClient = { x: 0, y: 0 };
+let draggingStartOffset = { x: 0, y: 0 };
+
+const tmpV3A = new THREE.Vector3();
+const tmpV3B = new THREE.Vector3();
+const tmpBox = new THREE.Box3();
 
 const avatarCatalog = [];
 const avatarById = new Map();
@@ -208,6 +231,221 @@ function logMessage(text, timeoutMs = 2600) {
         eventLog.textContent = '';
       }
     }, timeoutMs);
+  }
+}
+
+function warnOnce(key, text) {
+  if (oneShotWarnings.has(key)) return;
+  oneShotWarnings.add(key);
+  console.warn(text);
+}
+
+function makeNoiseTexture(size, drawFn) {
+  const canvasEl = document.createElement('canvas');
+  canvasEl.width = size;
+  canvasEl.height = size;
+  const ctx = canvasEl.getContext('2d');
+  drawFn(ctx, size);
+  const tex = new THREE.CanvasTexture(canvasEl);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const woodTexture = makeNoiseTexture(1024, (ctx, size) => {
+  ctx.fillStyle = '#5b3a24';
+  ctx.fillRect(0, 0, size, size);
+
+  for (let i = 0; i < 200; i += 1) {
+    const x = Math.random() * size;
+    const alpha = 0.05 + Math.random() * 0.12;
+    ctx.strokeStyle = `rgba(140, 100, 72, ${alpha})`;
+    ctx.lineWidth = 1 + Math.random() * 3;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.bezierCurveTo(
+      x + (Math.random() * 16 - 8),
+      size * 0.3,
+      x + (Math.random() * 16 - 8),
+      size * 0.7,
+      x + (Math.random() * 16 - 8),
+      size
+    );
+    ctx.stroke();
+  }
+
+  for (let i = 0; i < 4500; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const c = 45 + Math.floor(Math.random() * 35);
+    ctx.fillStyle = `rgba(${c}, ${c - 8}, ${c - 14}, ${0.09 + Math.random() * 0.08})`;
+    ctx.fillRect(x, y, 2, 2);
+  }
+});
+woodTexture.repeat.set(4.5, 4.5);
+
+const feltTexture = makeNoiseTexture(1024, (ctx, size) => {
+  ctx.fillStyle = '#2f7e59';
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 7000; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const shade = 90 + Math.floor(Math.random() * 70);
+    ctx.fillStyle = `rgba(${shade - 55}, ${shade + 20}, ${shade - 45}, ${0.06 + Math.random() * 0.08})`;
+    const s = Math.random() < 0.8 ? 1 : 2;
+    ctx.fillRect(x, y, s, s);
+  }
+});
+feltTexture.repeat.set(1.6, 1.6);
+
+function buildTableMaterial(kind) {
+  if (kind === 'felt') {
+    return new THREE.MeshStandardMaterial({
+      map: feltTexture,
+      color: 0xffffff,
+      roughness: 0.95,
+      metalness: 0.0
+    });
+  }
+  return new THREE.MeshStandardMaterial({
+    map: woodTexture,
+    color: 0xffffff,
+    roughness: 0.58,
+    metalness: 0.0
+  });
+}
+
+function applyTableSurfaceMaterials(root) {
+  root.traverse((obj) => {
+    if (!obj.isMesh) return;
+    const name = `${obj.name || ''} ${obj.material?.name || ''}`.toLowerCase();
+    const felt = name.includes('felt');
+    obj.material = buildTableMaterial(felt ? 'felt' : 'wood');
+    obj.castShadow = true;
+    obj.receiveShadow = true;
+  });
+}
+
+function findSeatAnchorY(object3d) {
+  let seatAnchor = null;
+  object3d.traverse((node) => {
+    if (seatAnchor) return;
+    if (!node?.name) return;
+    const n = node.name.toLowerCase();
+    if (n.includes('seatanchor') || n.includes('seat_anchor') || n === 'seat') {
+      seatAnchor = node;
+    }
+  });
+  if (seatAnchor) {
+    seatAnchor.updateWorldMatrix(true, false);
+    tmpV3A.setFromMatrixPosition(seatAnchor.matrixWorld);
+    object3d.worldToLocal(tmpV3A);
+    return tmpV3A.y;
+  }
+
+  tmpBox.setFromObject(object3d);
+  const height = Math.max(0.0001, tmpBox.max.y - tmpBox.min.y);
+  return tmpBox.min.y + height * 0.35;
+}
+
+function updateTableMetricsFromObject(object3d) {
+  tmpBox.setFromObject(object3d);
+  if (!Number.isFinite(tmpBox.max.y) || !Number.isFinite(tmpBox.min.y)) return;
+  tableMetrics.topY = tmpBox.max.y;
+  tableMetrics.floorY = tmpBox.min.y;
+}
+
+function projectWorldToScreen(world, out = { x: 0, y: 0 }) {
+  tmpV3A.copy(world).project(camera);
+  out.x = (tmpV3A.x * 0.5 + 0.5) * window.innerWidth;
+  out.y = (-tmpV3A.y * 0.5 + 0.5) * window.innerHeight;
+  return out;
+}
+
+function clampAvatarBaseY(baseY, seatIndex) {
+  const floorLimit = tableMetrics.floorY + 0.02;
+  const tableLimit = tableMetrics.topY - 0.1;
+  let out = Math.max(baseY, floorLimit);
+  if (out > tableLimit) {
+    warnOnce(`avatarTableClamp:${seatIndex}`, `Avatar seat ${seatIndex} clamped below table surface.`);
+    out = tableLimit;
+  }
+  return out;
+}
+
+function ensureNameplateTemplate(node, seatIndex) {
+  if (node.dataset.ready === '1') return;
+  node.dataset.ready = '1';
+  node.innerHTML = `
+    <div class="dragHandle" data-drag-seat="${seatIndex}" title="Drag">MOVE</div>
+    <div class="seatName"></div>
+    <div class="seatMeta"></div>
+  `;
+}
+
+function beginNameplateDrag(seatIndex, pointerId, clientX, clientY) {
+  draggingNameplateSeat = seatIndex;
+  draggingPointerId = pointerId;
+  draggingStartClient = { x: clientX, y: clientY };
+  draggingStartOffset = { ...nameplateOffsets[seatIndex] };
+  const node = document.getElementById(`nameplate-${seatIndex}`);
+  if (node) node.classList.add('dragging');
+}
+
+function updateDraggedNameplate(clientX, clientY) {
+  if (draggingNameplateSeat == null) return;
+  const dx = clientX - draggingStartClient.x;
+  const dy = clientY - draggingStartClient.y;
+  nameplateOffsets[draggingNameplateSeat].x = draggingStartOffset.x + dx;
+  nameplateOffsets[draggingNameplateSeat].y = draggingStartOffset.y + dy;
+}
+
+function endNameplateDrag() {
+  if (draggingNameplateSeat == null) return;
+  const node = document.getElementById(`nameplate-${draggingNameplateSeat}`);
+  if (node) node.classList.remove('dragging');
+  draggingNameplateSeat = null;
+  draggingPointerId = null;
+}
+
+function updateNameplatePositions() {
+  const localSeat = getLocalSeat();
+  const screen = { x: 0, y: 0 };
+  const handScreen = { x: 0, y: 0 };
+
+  for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
+    const rel = toRelativeSeat(seatIndex, localSeat);
+    const node = document.getElementById(`nameplate-${seatIndex}`);
+    if (!node) continue;
+
+    const anchor = SEATS[rel]?.nameplateAnchor?.pos || [0, 1.8, 0];
+    tmpV3B.set(anchor[0], anchor[1], anchor[2]);
+    tableRoot.localToWorld(tmpV3B);
+    projectWorldToScreen(tmpV3B, screen);
+
+    let x = screen.x + nameplateOffsets[seatIndex].x;
+    let y = screen.y + nameplateOffsets[seatIndex].y;
+
+    const handAnchor = SEATS[rel]?.handAnchor?.pos || [0, PLAY_PLANE_Y, 0];
+    tmpV3B.set(handAnchor[0], handAnchor[1], handAnchor[2]);
+    tableRoot.localToWorld(tmpV3B);
+    projectWorldToScreen(tmpV3B, handScreen);
+
+    if (Math.abs(x - handScreen.x) < 120 && Math.abs(y - handScreen.y) < 84) {
+      y -= 82;
+    }
+
+    if (rel === 0 && y > window.innerHeight - 185) {
+      y = window.innerHeight - 185;
+    }
+
+    x = Math.max(60, Math.min(window.innerWidth - 60, x));
+    y = Math.max(36, Math.min(window.innerHeight - 36, y));
+    node.style.left = `${x}px`;
+    node.style.top = `${y}px`;
   }
 }
 
@@ -391,19 +629,24 @@ function renderTallies(svg, value) {
 
 function updateScoreboard() {
   if (!roomState) {
-    renderTallies(tallyTeamA, 0);
-    renderTallies(tallyTeamB, 0);
-    pointsTeamA.textContent = 'Points: 0';
-    pointsTeamB.textContent = 'Points: 0';
+    scoreTeamAMain.textContent = '0/0';
+    scoreTeamBMain.textContent = '0/0';
     return;
   }
 
-  const marks = roomState.gameMarks || { teamA: 0, teamB: 0 };
   const points = roomState.pointsThisHand || { teamA: 0, teamB: 0 };
-  renderTallies(tallyTeamA, marks.teamA);
-  renderTallies(tallyTeamB, marks.teamB);
-  pointsTeamA.textContent = `Points: ${points.teamA}`;
-  pointsTeamB.textContent = `Points: ${points.teamB}`;
+  const target = roomState.targetThisHand || { teamA: 0, teamB: 0 };
+  scoreTeamAMain.textContent = `${points.teamA}/${target.teamA}`;
+  scoreTeamBMain.textContent = `${points.teamB}/${target.teamB}`;
+}
+
+function updateMarksMenu() {
+  const rounds = roomState?.roundWins || { teamA: 0, teamB: 0 };
+  const marks = roomState?.gameMarks || { teamA: 0, teamB: 0 };
+  renderTallies(menuRoundsTeamA, rounds.teamA);
+  renderTallies(menuRoundsTeamB, rounds.teamB);
+  renderTallies(menuMarksTeamA, marks.teamA);
+  renderTallies(menuMarksTeamB, marks.teamB);
 }
 
 function drawPips(ctx, value, xCenter) {
@@ -547,28 +790,30 @@ function clearGroup(group) {
   }
 }
 
-function normalizeAvatarModel(model, seatedY = 0.37, targetHeight = 1.65) {
-  const box = new THREE.Box3().setFromObject(model);
+function normalizeAvatarModel(model, targetHeight = 1.68) {
+  tmpBox.setFromObject(model);
   const size = new THREE.Vector3();
-  box.getSize(size);
+  tmpBox.getSize(size);
   if (size.y <= 0.0001) return;
 
   const scale = targetHeight / size.y;
   model.scale.multiplyScalar(scale);
 
-  box.setFromObject(model);
+  tmpBox.setFromObject(model);
   const center = new THREE.Vector3();
-  box.getCenter(center);
+  tmpBox.getCenter(center);
   model.position.x -= center.x;
   model.position.z -= center.z;
 
-  box.setFromObject(model);
-  model.position.y -= box.min.y;
+  tmpBox.setFromObject(model);
+  model.position.y -= tmpBox.min.y;
+}
 
-  // Fallback static seated stance when a sit animation clip does not exist.
-  model.rotation.x = -0.17;
-  model.position.y = seatedY - 0.24;
+function applyStaticSeatedPose(model) {
+  model.rotation.x = -0.16;
   model.scale.y *= 0.82;
+  tmpBox.setFromObject(model);
+  model.position.y -= tmpBox.min.y;
 }
 
 function tuneImportedMaterials(root) {
@@ -694,6 +939,7 @@ async function setSeatAvatarModel(seatIndex, avatarId) {
   const applyFallback = () => {
     if (activeAvatarLoadToken.get(seatIndex) !== token) return;
     targetGroup.add(buildFallbackAvatar());
+    updateSeatTransforms();
   };
 
   if (!entry?.file) {
@@ -707,7 +953,7 @@ async function setSeatAvatarModel(seatIndex, avatarId) {
 
     const cloned = clonedModelAsset(asset);
     tuneImportedMaterials(cloned.scene);
-    normalizeAvatarModel(cloned.scene, 0.37, 1.65);
+    normalizeAvatarModel(cloned.scene, 1.68);
     targetGroup.add(cloned.scene);
 
     const sitClip = cloned.animations.find((clip) => /sit/i.test(clip.name));
@@ -715,9 +961,10 @@ async function setSeatAvatarModel(seatIndex, avatarId) {
       const mixer = new THREE.AnimationMixer(cloned.scene);
       mixer.clipAction(sitClip).play();
       seatMixers.set(seatIndex, mixer);
-      cloned.scene.rotation.x = 0;
-      cloned.scene.position.y = 0;
+    } else {
+      applyStaticSeatedPose(cloned.scene);
     }
+    updateSeatTransforms();
   } catch {
     applyFallback();
   }
@@ -735,11 +982,13 @@ function setChairModelForSeat(seatIndex, chairTemplate) {
     fallback.castShadow = true;
     fallback.receiveShadow = true;
     group.add(fallback);
+    seatRuntime[seatIndex].chairSeatY = 0.42;
     return;
   }
   const clone = clonedModelAsset(chairTemplate).scene;
   tuneImportedMaterials(clone);
   group.add(clone);
+  seatRuntime[seatIndex].chairSeatY = findSeatAnchorY(clone);
 }
 
 async function loadEnvironmentModels() {
@@ -759,17 +1008,26 @@ async function loadEnvironmentModels() {
   tableNode.name = 'tableModel';
   if (environmentTemplates.table) {
     const tableClone = clonedModelAsset(environmentTemplates.table).scene;
-    tuneImportedMaterials(tableClone);
+    applyTableSurfaceMaterials(tableClone);
     tableNode.add(tableClone);
   } else {
-    const fallback = new THREE.Mesh(
-      new THREE.CylinderGeometry(5.8, 5.8, 0.48, 64),
-      new THREE.MeshStandardMaterial({ color: 0x5f3618, roughness: 0.6, metalness: 0.08 })
+    const wood = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.4, 2.4, 0.22, 64),
+      buildTableMaterial('wood')
     );
-    fallback.position.y = PLAY_PLANE_Y - 0.24;
-    fallback.receiveShadow = true;
-    fallback.castShadow = true;
-    tableNode.add(fallback);
+    wood.position.y = 0.52;
+    wood.receiveShadow = true;
+    wood.castShadow = true;
+    tableNode.add(wood);
+
+    const felt = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.1, 2.1, 0.02, 64),
+      buildTableMaterial('felt')
+    );
+    felt.position.y = 0.63;
+    felt.receiveShadow = true;
+    felt.castShadow = false;
+    tableNode.add(felt);
   }
 
   const prevTable = environmentGroup.getObjectByName('tableModel');
@@ -778,6 +1036,7 @@ async function loadEnvironmentModels() {
     clearGroup(prevTable);
   }
   environmentGroup.add(tableNode);
+  updateTableMetricsFromObject(tableNode);
 
   for (let seat = 0; seat < 4; seat += 1) {
     setChairModelForSeat(seat, environmentTemplates.chair);
@@ -797,9 +1056,17 @@ function updateSeatTransforms() {
     chairGroup.rotation.y = seatConfig.chair.rotY;
 
     const avatarGroup = avatarSeatGroups[seatIndex];
-    avatarGroup.position.set(...seatConfig.avatar.pos);
+    let avatarBaseY = seatConfig.avatar.pos[1] + seatRuntime[seatIndex].chairSeatY + 0.03;
+    avatarBaseY = clampAvatarBaseY(avatarBaseY, seatIndex);
+    avatarGroup.position.set(seatConfig.avatar.pos[0], avatarBaseY, seatConfig.avatar.pos[2]);
+    if (avatarBaseY >= tableMetrics.topY - 0.11) {
+      avatarGroup.position.x *= 1.08;
+      avatarGroup.position.z *= 1.08;
+    }
     avatarGroup.rotation.y = seatConfig.avatar.rotY;
   }
+
+  updateNameplatePositions();
 }
 
 function renderAvatars() {
@@ -896,6 +1163,24 @@ function renderBurnPiles() {
 
   const aTiles = roomState.burnPiles?.teamA || [];
   const bTiles = roomState.burnPiles?.teamB || [];
+  const localSeat = getLocalSeat();
+
+  const pileAnchorForTeam = (teamSeatIndexes) => {
+    let sx = 0;
+    let sz = 0;
+    for (const seatIndex of teamSeatIndexes) {
+      const rel = toRelativeSeat(seatIndex, localSeat);
+      const anchor = SEATS[rel]?.handAnchor?.pos || [0, DOMINO_Y, 0];
+      sx += anchor[0];
+      sz += anchor[2];
+    }
+    const avgX = sx / teamSeatIndexes.length;
+    const avgZ = sz / teamSeatIndexes.length;
+    return { x: avgX * 0.74, z: avgZ * 0.74 };
+  };
+
+  const teamAAnchor = pileAnchorForTeam([0, 2]);
+  const teamBAnchor = pileAnchorForTeam([1, 3]);
 
   const renderPile = (tiles, group, x, z, rotY) => {
     const sample = tiles.slice(-12);
@@ -913,28 +1198,24 @@ function renderBurnPiles() {
     });
   };
 
-  renderPile(aTiles, burnGroupA, -2.8, 2.6, 0.18);
-  renderPile(bTiles, burnGroupB, 2.2, -3.0, -0.2);
+  renderPile(aTiles, burnGroupA, teamAAnchor.x, teamAAnchor.z, 0.18);
+  renderPile(bTiles, burnGroupB, teamBAnchor.x, teamBAnchor.z, -0.2);
 }
 
 function updateHud() {
   if (!roomState) {
     hudBidValue.textContent = '-';
     hudTrumpValue.textContent = '-';
-    marksText.textContent = 'Not in a room.';
     updateScoreboard();
+    updateMarksMenu();
     return;
   }
 
   hudBidValue.textContent = roomState.bidValue == null ? '-' : String(roomState.bidValue);
   hudTrumpValue.textContent = currentTrumpLabel();
 
-  const marks = roomState.gameMarks || { teamA: 0, teamB: 0 };
-  const rounds = roomState.roundWins || { teamA: 0, teamB: 0 };
-  const points = roomState.pointsThisHand || { teamA: 0, teamB: 0 };
-  const target = roomState.targetThisHand || { teamA: 0, teamB: 0 };
-  marksText.textContent = `Marks A/B: ${marks.teamA}/${marks.teamB} | Rounds A/B: ${rounds.teamA}/${rounds.teamB} | Points A/B: ${points.teamA}/${points.teamB} | Target A/B: ${target.teamA}/${target.teamB}`;
   updateScoreboard();
+  updateMarksMenu();
 }
 
 function updateNameplates() {
@@ -963,9 +1244,16 @@ function updateNameplates() {
     const crown = crownTeam && teamForSeat(seatIndex) === crownTeam ? ' 👑' : '';
     const bidText = roomState?.phase === PHASES.BIDDING ? ` | Bid: ${seatBids[seatIndex] || 'PASS'}` : '';
 
+    ensureNameplateTemplate(node, seatIndex);
+    const seatNameEl = node.querySelector('.seatName');
+    const seatMetaEl = node.querySelector('.seatMeta');
+    if (seatNameEl) seatNameEl.textContent = `${seat.name}${crown}`;
+    if (seatMetaEl) seatMetaEl.textContent = `${role}${bidText}`;
+
     node.classList.toggle('active', active);
-    node.innerHTML = `<div class="seatName">${seat.name}${crown}</div><div class="seatMeta">${role}${bidText}</div>`;
   }
+
+  updateNameplatePositions();
 }
 
 function buildAvatarPickerGrid() {
@@ -1385,6 +1673,29 @@ function ensureButtons() {
   avatarModalBackdrop.addEventListener('click', closeAvatarModal);
   closeAvatarModalBtn.addEventListener('click', closeAvatarModal);
 
+  const nameplatesWrap = document.getElementById('nameplates');
+  nameplatesWrap.addEventListener('pointerdown', (event) => {
+    const handle = event.target.closest('.dragHandle');
+    if (!handle) return;
+    const seatIndex = Number(handle.dataset.dragSeat);
+    if (!Number.isInteger(seatIndex)) return;
+    beginNameplateDrag(seatIndex, event.pointerId, event.clientX, event.clientY);
+    event.preventDefault();
+  });
+
+  window.addEventListener('pointermove', (event) => {
+    if (draggingNameplateSeat == null) return;
+    if (draggingPointerId != null && event.pointerId !== draggingPointerId) return;
+    updateDraggedNameplate(event.clientX, event.clientY);
+  });
+
+  window.addEventListener('pointerup', (event) => {
+    if (draggingPointerId != null && event.pointerId !== draggingPointerId) return;
+    endNameplateDrag();
+  });
+
+  window.addEventListener('pointercancel', endNameplateDrag);
+
   window.addEventListener('keydown', (event) => {
     if (event.key.toLowerCase() === 'd' && event.shiftKey) {
       debugVisible = !debugVisible;
@@ -1433,6 +1744,7 @@ function animate() {
   for (const mixer of seatMixers.values()) {
     mixer.update(dt);
   }
+  updateNameplatePositions();
   renderer.render(scene, camera);
 }
 

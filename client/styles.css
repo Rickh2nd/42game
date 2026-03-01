@@ -39,22 +39,22 @@ body,
 
 #scoreboard {
   position: absolute;
-  top: 10px;
+  top: 14px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 8px;
+  gap: 12px;
   pointer-events: none;
   z-index: 4;
 }
 
 .scoreCard {
-  min-width: 230px;
+  min-width: 190px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(8, 14, 21, 0.66);
   backdrop-filter: blur(3px);
-  padding: 6px 8px;
+  padding: 7px 9px;
 }
 
 .scoreLabel {
@@ -63,17 +63,12 @@ body,
   letter-spacing: 0.12em;
 }
 
-.scoreSub {
-  font-size: 11px;
-  color: #d9e5f2;
-  margin-top: 2px;
-}
-
-.tallySvg {
-  width: 220px;
-  height: 42px;
-  display: block;
+.scoreMain {
   margin-top: 3px;
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 800;
+  color: #f6e7c0;
 }
 
 #gameCanvas {
@@ -116,9 +111,9 @@ body,
 }
 
 #nameplates {
-  pointer-events: none;
   position: absolute;
   inset: 0;
+  z-index: 3;
 }
 
 .nameplate {
@@ -133,10 +128,13 @@ body,
   font-size: 12px;
   text-align: center;
   transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
 }
 
 .nameplate .seatName {
   font-weight: 600;
+  margin-top: 2px;
 }
 
 .nameplate .seatMeta {
@@ -148,31 +146,51 @@ body,
 .nameplate.active {
   border-color: var(--gold-strong);
   box-shadow: 0 0 0 1px rgba(242, 204, 119, 0.35), 0 0 15px rgba(242, 204, 119, 0.28);
-  transform: scale(1.03);
 }
 
-#nameplate-0 {
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
+.dragHandle {
+  pointer-events: auto;
+  cursor: grab;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #b5c4d7;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.2);
+  padding-bottom: 2px;
+  margin-bottom: 2px;
 }
 
-#nameplate-1 {
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
+.nameplate.dragging .dragHandle {
+  cursor: grabbing;
 }
 
-#nameplate-2 {
-  left: 50%;
-  top: 10px;
-  transform: translateX(-50%);
+.marksBlock + .marksBlock {
+  margin-top: 8px;
 }
 
-#nameplate-3 {
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
+.marksTitle {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: #d7bd85;
+}
+
+.marksCols {
+  margin-top: 4px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.marksColLabel {
+  font-size: 11px;
+  color: var(--subtle);
+  margin-bottom: 3px;
+}
+
+.menuTallySvg {
+  width: 100%;
+  height: 40px;
+  display: block;
 }
 
 #panelToggle {
@@ -447,17 +465,19 @@ button:disabled {
 
 @media (max-width: 920px) {
   #scoreboard {
-    top: 8px;
-    gap: 5px;
+    top: 10px;
+    width: min(96vw, 460px);
+    justify-content: center;
+    gap: 8px;
   }
 
   .scoreCard {
-    min-width: 172px;
+    min-width: 160px;
     padding: 5px 6px;
   }
 
-  .tallySvg {
-    width: 170px;
+  .scoreMain {
+    font-size: 19px;
   }
 
   #tableHud {
@@ -468,20 +488,5 @@ button:disabled {
   .nameplate {
     min-width: 110px;
     font-size: 11px;
-  }
-
-  #nameplate-1,
-  #nameplate-3 {
-    top: auto;
-    bottom: 70px;
-    transform: none;
-  }
-
-  #nameplate-1 {
-    right: 8px;
-  }
-
-  #nameplate-3 {
-    left: 8px;
   }
 }

@@ -551,6 +551,13 @@ function completeTrick(room) {
     points: result.points
   });
 
+  const targetForWinner = Number(room.targetThisHand?.[winnerTeam] || 0);
+  const winnerReachedTarget = targetForWinner > 0 && Number(room.pointsThisHand?.[winnerTeam] || 0) >= targetForWinner;
+  if (winnerReachedTarget) {
+    enterTrickPause(room, true);
+    return;
+  }
+
   enterTrickPause(room, handIsFinished(room));
 }
 

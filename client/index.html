@@ -20,14 +20,12 @@
         <canvas id="gameCanvas"></canvas>
         <div id="scoreboard">
           <div class="scoreCard" id="score-teamA">
-            <div class="scoreLabel">TEAM A MARKS</div>
-            <svg id="tally-teamA" class="tallySvg" viewBox="0 0 220 42" aria-label="Team A marks"></svg>
-            <div class="scoreSub" id="points-teamA">Points: 0</div>
+            <div class="scoreLabel">TEAM 1 SCORE</div>
+            <div class="scoreMain" id="score-teamA-main">0/0</div>
           </div>
           <div class="scoreCard" id="score-teamB">
-            <div class="scoreLabel">TEAM B MARKS</div>
-            <svg id="tally-teamB" class="tallySvg" viewBox="0 0 220 42" aria-label="Team B marks"></svg>
-            <div class="scoreSub" id="points-teamB">Points: 0</div>
+            <div class="scoreLabel">TEAM 2 SCORE</div>
+            <div class="scoreMain" id="score-teamB-main">0/0</div>
           </div>
         </div>
         <div id="tableHud">
@@ -108,7 +106,32 @@
 
         <section id="section-marks" class="panelSection">
           <h2>MARKS</h2>
-          <div id="marksText" class="smallText"></div>
+          <div class="marksBlock">
+            <div class="marksTitle">Hand Wins</div>
+            <div class="marksCols">
+              <div class="marksCol">
+                <div class="marksColLabel">Team 1</div>
+                <svg id="menu-rounds-teamA" class="menuTallySvg" viewBox="0 0 220 42" aria-label="Team 1 hand wins"></svg>
+              </div>
+              <div class="marksCol">
+                <div class="marksColLabel">Team 2</div>
+                <svg id="menu-rounds-teamB" class="menuTallySvg" viewBox="0 0 220 42" aria-label="Team 2 hand wins"></svg>
+              </div>
+            </div>
+          </div>
+          <div class="marksBlock">
+            <div class="marksTitle">Game Marks</div>
+            <div class="marksCols">
+              <div class="marksCol">
+                <div class="marksColLabel">Team 1</div>
+                <svg id="menu-marks-teamA" class="menuTallySvg" viewBox="0 0 220 42" aria-label="Team 1 game marks"></svg>
+              </div>
+              <div class="marksCol">
+                <div class="marksColLabel">Team 2</div>
+                <svg id="menu-marks-teamB" class="menuTallySvg" viewBox="0 0 220 42" aria-label="Team 2 game marks"></svg>
+              </div>
+            </div>
+          </div>
         </section>
 
         <div id="eventLog" aria-live="polite"></div>
