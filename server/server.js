@@ -861,7 +861,10 @@ function closeBettingRound(room) {
     room.bettingTimer = null;
   }
   const closePayload = {
+    enabled: !!room.bettingEnabledNextHand,
+    isOpen: false,
     handId: Number(pending.handId || room.bettingHandId || room.handNumber || 0),
+    betAmount: Number(pending.amount || room.baseBetAmount || 10),
     betPot: Number(pending.pot || 0),
     betState: { ...responses }
   };
@@ -876,6 +879,7 @@ function closeBettingRound(room) {
   });
   broadcastRoomSocketEvent(room, 'betting:close', closePayload);
   beginPlayingTricks(room);
+  broadcastRoom(room);
 }
 
 function startBettingRound(room) {
@@ -911,7 +915,10 @@ function startBettingRound(room) {
     scheduleCpuIfNeeded(room);
   }, BETTING_RESPONSE_WINDOW_MS);
   const openPayload = {
+    enabled: !!room.bettingEnabledNextHand,
+    isOpen: true,
     handId: Number(room.pendingBets.handId || room.handNumber || 0),
+    betAmount: amount,
     defaultBet: amount,
     players: (room.activeSeats || []).map((seatIndex) => ({
       seatIndex,
@@ -925,6 +932,7 @@ function startBettingRound(room) {
     ...openPayload
   });
   broadcastRoomSocketEvent(room, 'betting:open', openPayload);
+  broadcastRoom(room);
 }
 
 function resolveBettingResponse(room, seatIndex, decision) {

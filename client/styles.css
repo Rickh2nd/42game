@@ -649,6 +649,13 @@ body,
   color: #f4d49b;
 }
 
+#settingsLoadText,
+#bettingDebugText {
+  margin-top: 8px;
+  color: #a8b5c8;
+  line-height: 1.35;
+}
+
 .modal {
   position: fixed;
   inset: 0;

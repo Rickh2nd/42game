@@ -44,7 +44,8 @@ const AVATAR_Y_OFFSETS_STORAGE_KEY = 'texas42_avatar_y_offsets_v1';
 const CHAIRS_VISIBLE_STORAGE_KEY = 'texas42_chairs_visible_v1';
 const BURN_PANEL_OPACITY_STORAGE_KEY = 'texas42_burn_panel_opacity_v1';
 const TABLE_HUD_STORAGE_KEY = 'texas42_table_hud_v1';
-const BETTING_MODAL_STORAGE_KEY = 'texas42_betting_modal_v1';
+const BETTING_MODAL_STORAGE_KEY = 'texas42_bet_modal_pos_v1';
+const BETTING_MODAL_STORAGE_KEY_LEGACY = 'texas42_betting_modal_v1';
 const MUTE_STORAGE_KEY = 'texas42_mute_v1';
 const PLAYER_ID_STORAGE_KEY = 'texas42_player_id';
 const CLIENT_VERSION = '1.0.0';
@@ -78,9 +79,11 @@ const bettingEnabledToggle = document.getElementById('bettingEnabledToggle');
 const betAmountInput = document.getElementById('bet_amount');
 const betAmountValue = document.getElementById('bet_amount_val');
 const bettingStateText = document.getElementById('bettingStateText');
+const bettingDebugText = document.getElementById('bettingDebugText');
 const bettingTotals = document.getElementById('bettingTotals');
 const resetViewBtn = document.getElementById('resetViewBtn');
 const copyViewBtn = document.getElementById('copyViewBtn');
+const settingsLoadText = document.getElementById('settingsLoadText');
 const resetSceneTuningBtn = document.getElementById('resetSceneTuningBtn');
 const copySceneTuningBtn = document.getElementById('copySceneTuningBtn');
 const chairsVisibleToggle = document.getElementById('chairsVisibleToggle');
@@ -131,7 +134,7 @@ const actionModalTitle = document.getElementById('actionModalTitle');
 const actionModalBody = document.getElementById('actionModalBody');
 const actionModalButtons = document.getElementById('actionModalButtons');
 const actionModalModeButtons = document.getElementById('actionModalModeButtons');
-const bettingModal = document.getElementById('bettingModal');
+const bettingModal = document.getElementById('betModal') || document.getElementById('bettingModal');
 const bettingModalTitle = document.getElementById('bettingModalTitle');
 const bettingModalBody = document.getElementById('bettingModalBody');
 const bettingModalPot = document.getElementById('bettingModalPot');
@@ -524,6 +527,9 @@ let socketInfoPollTimer = null;
 let healthPollTimer = null;
 let chairsVisible = true;
 let showTableDominoBounds = false;
+let viewSettingsLoadSource = 'defaults';
+let sceneTuningLoadSource = 'defaults';
+let pendingBettingOpenEvent = null;
 localClientId = localStorage.getItem(PLAYER_ID_STORAGE_KEY) || null;
 
 const localHandScreenBounds = {
@@ -689,6 +695,11 @@ function getStoredPlayerName() {
   return raw.slice(0, 24);
 }
 
+function updateSettingsLoadedText() {
+  if (!settingsLoadText) return;
+  settingsLoadText.textContent = `Settings Loaded | view source: ${viewSettingsLoadSource} | scene source: ${sceneTuningLoadSource}`;
+}
+
 function applyDefaultViewSettings() {
   Object.assign(viewSettings, DEFAULT_VIEW_SETTINGS);
   sanitizeViewSettings();
@@ -716,15 +727,18 @@ function buildViewSettingsPayload() {
 
 function loadStoredViewSettings() {
   applyDefaultViewSettings();
+  viewSettingsLoadSource = 'defaults';
   try {
     const raw = localStorage.getItem(VIEW_STORAGE_KEY);
     if (!raw) {
       persistViewSettings();
+      updateSettingsLoadedText();
       return;
     }
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') {
       persistViewSettings();
+      updateSettingsLoadedText();
       return;
     }
 
@@ -737,6 +751,9 @@ function loadStoredViewSettings() {
     }
     if (!hasAnySavedValue) {
       applyDefaultViewSettings();
+      viewSettingsLoadSource = 'defaults';
+    } else {
+      viewSettingsLoadSource = 'storage';
     }
     sanitizeViewSettings();
 
@@ -746,8 +763,10 @@ function loadStoredViewSettings() {
     }
   } catch {
     applyDefaultViewSettings();
+    viewSettingsLoadSource = 'defaults';
     persistViewSettings();
   }
+  updateSettingsLoadedText();
 }
 
 function persistViewSettings() {
@@ -783,6 +802,7 @@ function buildSceneTuningPayload() {
 
 function loadStoredSceneTuning() {
   applyDefaultSceneTuningSettings();
+  sceneTuningLoadSource = 'defaults';
   try {
     const raw = localStorage.getItem(SCENE_TUNING_STORAGE_KEY);
     if (!raw) {
@@ -802,12 +822,14 @@ function loadStoredSceneTuning() {
       }
       persistSceneTuning();
       localStorage.removeItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
+      updateSettingsLoadedText();
       return;
     }
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') {
       persistSceneTuning();
       localStorage.removeItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
+      updateSettingsLoadedText();
       return;
     }
 
@@ -822,6 +844,9 @@ function loadStoredSceneTuning() {
       for (const key of SCENE_TUNING_NUMERIC_KEYS) {
         sceneTuning[key] = Number(DEFAULT_SCENE_TUNING[key]);
       }
+      sceneTuningLoadSource = 'defaults';
+    } else {
+      sceneTuningLoadSource = 'storage';
     }
 
     let offsetLoaded = false;
@@ -862,9 +887,11 @@ function loadStoredSceneTuning() {
     localStorage.removeItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
   } catch {
     applyDefaultSceneTuningSettings();
+    sceneTuningLoadSource = 'defaults';
     persistSceneTuning();
     localStorage.removeItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
   }
+  updateSettingsLoadedText();
 }
 
 function persistSceneTuning() {
@@ -1001,7 +1028,8 @@ function applyBettingModalSettings({ persist = false } = {}) {
 
 function loadStoredBettingModalSettings() {
   try {
-    const raw = localStorage.getItem(BETTING_MODAL_STORAGE_KEY);
+    const raw = localStorage.getItem(BETTING_MODAL_STORAGE_KEY)
+      || localStorage.getItem(BETTING_MODAL_STORAGE_KEY_LEGACY);
     if (!raw) {
       applyBettingModalSettings();
       return;
@@ -1014,6 +1042,7 @@ function loadStoredBettingModalSettings() {
   } catch {
     // ignore invalid payload
   }
+  localStorage.removeItem(BETTING_MODAL_STORAGE_KEY_LEGACY);
   applyBettingModalSettings();
 }
 
@@ -2053,14 +2082,19 @@ function currentBettingState() {
   if (!roomState) return null;
   const model = roomState.betting && typeof roomState.betting === 'object' ? roomState.betting : null;
   if (model) {
+    const pendingOpenForHand = pendingBettingOpenEvent
+      && Number(pendingBettingOpenEvent.handId || 0) === Number(model.handId || roomState.handNumber || 0);
+    const mergedState = pendingOpenForHand && pendingBettingOpenEvent.betState && typeof pendingBettingOpenEvent.betState === 'object'
+      ? { ...pendingBettingOpenEvent.betState, ...(model.betState || {}) }
+      : (model.betState && typeof model.betState === 'object' ? { ...model.betState } : {});
     return {
       enabled: !!model.enabled,
-      isOpen: !!model.isOpen,
+      isOpen: !!model.isOpen || !!pendingOpenForHand || roomState.phase === PHASES.BETTING,
       handId: Number(model.handId || roomState.handNumber || 0),
       amount: Math.max(1, Number(model.betAmount || roomState.baseBetAmount || 10)),
-      pot: Number(model.betPot || 0),
-      responses: model.betState && typeof model.betState === 'object'
-        ? { ...model.betState }
+      pot: Number(((pendingOpenForHand ? pendingBettingOpenEvent?.betPot : null) ?? model.betPot) || 0),
+      responses: Object.keys(mergedState).length
+        ? mergedState
         : (roomState.pendingBets?.responses ? { ...roomState.pendingBets.responses } : {})
     };
   }
@@ -2148,6 +2182,9 @@ function updateBettingControls() {
 
   if (!roomState) {
     if (bettingStateText) bettingStateText.textContent = 'Betting Off';
+    if (bettingDebugText) {
+      bettingDebugText.textContent = 'Betting Debug | enabled: false | isOpen: false | handId: -';
+    }
     if (bettingTotals) bettingTotals.replaceChildren();
     closeBettingModal();
     return;
@@ -2162,6 +2199,11 @@ function updateBettingControls() {
     } else {
       bettingStateText.textContent = 'Betting On (next hand if already playing)';
     }
+  }
+  if (bettingDebugText) {
+    const isOpen = !!betting?.isOpen;
+    const handId = Number(betting?.handId || roomState.handNumber || 0);
+    bettingDebugText.textContent = `Betting Debug | enabled: ${enabled} | isOpen: ${isOpen} | handId: ${handId} | phase: ${roomState.phase || '-'}`;
   }
 
   if (bettingTotals) {
@@ -3199,6 +3241,7 @@ function updateViewControlsUi() {
           ? `${viewSettings[key].toFixed(3)}`
         : viewSettings[key].toFixed(2);
   }
+  updateSettingsLoadedText();
 }
 
 function sanitizeSceneTuning() {
@@ -3232,6 +3275,7 @@ function updateSceneTuningUi() {
   if (chairsVisibleToggle) {
     chairsVisibleToggle.checked = chairsVisible;
   }
+  updateSettingsLoadedText();
 }
 
 function applySceneTuning({ rerenderHand = true } = {}) {
@@ -3374,8 +3418,10 @@ function resetViewForLocalSeat(immediate = true) {
 
 function resetViewSettingsToDefault() {
   applyDefaultViewSettings();
+  viewSettingsLoadSource = 'defaults';
   persistViewSettings();
   updateViewControlsUi();
+  updateSettingsLoadedText();
   safeApplyViewSettings(true);
   renderHandsAndTrick();
   updateNameplatePositions();
@@ -3463,7 +3509,9 @@ function setEnvironmentLoadStatus(state, detail = '') {
     if (state === 'loading') {
       environmentLoadText.textContent = 'Environment loading...';
     } else if (state === 'ok') {
-      environmentLoadText.textContent = 'Environment loaded: OK';
+      environmentLoadText.textContent = detail
+        ? `Environment loaded: OK | ${detail}`
+        : 'Environment loaded: OK';
     } else if (state === 'fallback') {
       environmentLoadText.textContent = `Environment fallback: ${detail || 'missing HDR/texture'}`;
     } else {
@@ -3575,8 +3623,16 @@ async function fetchEnvironmentFiles(entry) {
     }
   })();
 
-  environmentFileCatalogCache.set(envId, task);
-  return task;
+  const wrapped = task.then((files) => {
+    if (!Array.isArray(files) || files.length === 0) {
+      environmentFileCatalogCache.delete(envId);
+      return [];
+    }
+    return files;
+  });
+
+  environmentFileCatalogCache.set(envId, wrapped);
+  return wrapped;
 }
 
 function findTextureFile(files, { dirHint, tags = [] }) {
@@ -3669,8 +3725,16 @@ async function loadEnvironmentTexture(url, { srgb = true, repeat = [1, 1] } = {}
     );
   });
 
-  environmentTextureCache.set(key, task);
-  return task;
+  const wrapped = task.then((tex) => {
+    if (!tex) {
+      environmentTextureCache.delete(key);
+      return null;
+    }
+    return tex;
+  });
+
+  environmentTextureCache.set(key, wrapped);
+  return wrapped;
 }
 
 async function loadEnvironmentHdri(url) {
@@ -3689,11 +3753,80 @@ async function loadEnvironmentHdri(url) {
       return null;
     }
   })();
-  environmentHdriCache.set(url, task);
-  return task;
+  const wrapped = task.then((tex) => {
+    if (!tex) {
+      environmentHdriCache.delete(url);
+      return null;
+    }
+    return tex;
+  });
+  environmentHdriCache.set(url, wrapped);
+  return wrapped;
 }
 
 const ENV_TEX_EXTS = ['png', 'jpg', 'jpeg'];
+
+function buildMaterialMapCandidates(envRoot, materialDirCandidates, fileBase) {
+  const out = [];
+  for (const dir of materialDirCandidates) {
+    const safeDir = String(dir || '').replace(/^\/+|\/+$/g, '');
+    if (!safeDir) continue;
+    const base = normalizeAssetUrlPath(`${envRoot}/${safeDir}`);
+    for (const ext of ['png', 'jpg']) {
+      out.push(`${base}/${fileBase}.${ext}`);
+    }
+  }
+  return [...new Set(out)];
+}
+
+function resolveMaterialPaths(envRoot, environmentId) {
+  const floorDirCandidates = environmentId === 'casino_lounge'
+    ? ['materials/carpet', 'materials/floor']
+    : ['materials/floor'];
+  const wallDirCandidates = ['materials/walls'];
+  const trimDirCandidates = ['materials/trim'];
+
+  return {
+    floor: {
+      baseColor: buildMaterialMapCandidates(envRoot, floorDirCandidates, 'baseColor'),
+      normal: buildMaterialMapCandidates(envRoot, floorDirCandidates, 'normal'),
+      roughness: buildMaterialMapCandidates(envRoot, floorDirCandidates, 'roughness')
+    },
+    walls: {
+      baseColor: buildMaterialMapCandidates(envRoot, wallDirCandidates, 'baseColor'),
+      normal: buildMaterialMapCandidates(envRoot, wallDirCandidates, 'normal'),
+      roughness: buildMaterialMapCandidates(envRoot, wallDirCandidates, 'roughness')
+    },
+    trim: {
+      baseColor: buildMaterialMapCandidates(envRoot, trimDirCandidates, 'baseColor'),
+      normal: buildMaterialMapCandidates(envRoot, trimDirCandidates, 'normal'),
+      roughness: buildMaterialMapCandidates(envRoot, trimDirCandidates, 'roughness')
+    }
+  };
+}
+
+async function loadTextureSafe(candidates, { srgb, repeat }, envStatus, statusKey) {
+  const urls = Array.isArray(candidates) ? candidates : [];
+  let firstTriedUrl = '';
+  for (const url of urls) {
+    if (!firstTriedUrl) firstTriedUrl = url;
+    const tex = await loadEnvironmentTexture(url, { srgb, repeat });
+    if (tex) {
+      if (envStatus && statusKey) {
+        envStatus.loadedMaps[statusKey] = url;
+      }
+      return tex;
+    }
+  }
+  if (envStatus && statusKey && !envStatus.missingMaps.includes(statusKey)) {
+    envStatus.missingMaps.push(statusKey);
+  }
+  if (envStatus && !envStatus.firstFailedUrl && firstTriedUrl) {
+    envStatus.firstFailedUrl = firstTriedUrl;
+    envStatus.firstFailedReason = 'map load failed';
+  }
+  return null;
+}
 
 function escapeRegExp(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -3883,33 +4016,52 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   const wallRepeat = [4, 3];
   const trimRepeat = [7, 2];
   const envRoot = environmentRootFor(entry);
-  const floorDirCandidates = environmentId === 'casino_lounge'
-    ? ['materials/carpet', 'materials/floor']
-    : ['materials/floor'];
-  const wallDirCandidates = ['materials/walls'];
-  const trimDirCandidates = ['materials/trim'];
+  const envStatus = {
+    envId: environmentId,
+    loadedMaps: {},
+    missingMaps: [],
+    firstFailedUrl: '',
+    firstFailedReason: ''
+  };
+  const materialPaths = resolveMaterialPaths(envRoot, environmentId);
   const catalog = await fetchEnvironmentFiles(entry);
   if (token !== environmentApplyToken) return;
-  const [floorSet, wallSet, trimSet] = await Promise.all([
-    loadExpectedMaterialSet(envRoot, floorDirCandidates, floorRepeat, 'floor', catalog),
-    loadExpectedMaterialSet(envRoot, wallDirCandidates, wallRepeat, 'walls', catalog),
-    loadExpectedMaterialSet(envRoot, trimDirCandidates, trimRepeat, 'trim', catalog)
+  const [
+    floorBaseTex,
+    floorNormalTex,
+    floorRoughTex,
+    wallBaseTex,
+    wallNormalTex,
+    wallRoughTex,
+    trimBaseTex,
+    trimNormalTex,
+    trimRoughTex
+  ] = await Promise.all([
+    loadTextureSafe(materialPaths.floor.baseColor, { srgb: true, repeat: floorRepeat }, envStatus, 'floor.baseColor'),
+    loadTextureSafe(materialPaths.floor.normal, { srgb: false, repeat: floorRepeat }, envStatus, 'floor.normal'),
+    loadTextureSafe(materialPaths.floor.roughness, { srgb: false, repeat: floorRepeat }, envStatus, 'floor.roughness'),
+    loadTextureSafe(materialPaths.walls.baseColor, { srgb: true, repeat: wallRepeat }, envStatus, 'walls.baseColor'),
+    loadTextureSafe(materialPaths.walls.normal, { srgb: false, repeat: wallRepeat }, envStatus, 'walls.normal'),
+    loadTextureSafe(materialPaths.walls.roughness, { srgb: false, repeat: wallRepeat }, envStatus, 'walls.roughness'),
+    loadTextureSafe(materialPaths.trim.baseColor, { srgb: true, repeat: trimRepeat }, envStatus, 'trim.baseColor'),
+    loadTextureSafe(materialPaths.trim.normal, { srgb: false, repeat: trimRepeat }, envStatus, 'trim.normal'),
+    loadTextureSafe(materialPaths.trim.roughness, { srgb: false, repeat: trimRepeat }, envStatus, 'trim.roughness')
   ]);
   if (token !== environmentApplyToken) return;
 
-  if (floorSet.base) floorMaterial.map = floorSet.base;
-  if (floorSet.normal) floorMaterial.normalMap = floorSet.normal;
-  if (floorSet.roughness) floorMaterial.roughnessMap = floorSet.roughness;
+  if (floorBaseTex) floorMaterial.map = floorBaseTex;
+  if (floorNormalTex) floorMaterial.normalMap = floorNormalTex;
+  if (floorRoughTex) floorMaterial.roughnessMap = floorRoughTex;
   floorMaterial.needsUpdate = true;
 
-  if (wallSet.base) wallMaterial.map = wallSet.base;
-  if (wallSet.normal) wallMaterial.normalMap = wallSet.normal;
-  if (wallSet.roughness) wallMaterial.roughnessMap = wallSet.roughness;
+  if (wallBaseTex) wallMaterial.map = wallBaseTex;
+  if (wallNormalTex) wallMaterial.normalMap = wallNormalTex;
+  if (wallRoughTex) wallMaterial.roughnessMap = wallRoughTex;
   wallMaterial.needsUpdate = true;
 
-  if (trimSet.base) trimMaterial.map = trimSet.base;
-  if (trimSet.normal) trimMaterial.normalMap = trimSet.normal;
-  if (trimSet.roughness) trimMaterial.roughnessMap = trimSet.roughness;
+  if (trimBaseTex) trimMaterial.map = trimBaseTex;
+  if (trimNormalTex) trimMaterial.normalMap = trimNormalTex;
+  if (trimRoughTex) trimMaterial.roughnessMap = trimRoughTex;
   trimMaterial.needsUpdate = true;
 
   const hdriTex = await chooseEnvironmentHdri(envRoot, environmentId, catalog);
@@ -3949,7 +4101,7 @@ async function buildRoomEnvironment(entry, token, environmentId) {
     }
   } else {
     const frameMaterial = new THREE.MeshStandardMaterial({
-      map: trimSet.base || woodTexture,
+      map: trimBaseTex || woodTexture,
       color: 0xffffff,
       roughness: 0.62,
       metalness: 0.02
@@ -3977,16 +4129,27 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   }
 
   if (token !== environmentApplyToken) return;
-  const missingBaseMaps = [];
-  if (!floorSet.base) missingBaseMaps.push('floor');
-  if (!wallSet.base) missingBaseMaps.push('walls');
-  if (!trimSet.base) missingBaseMaps.push('trim');
-  if (missingBaseMaps.length >= 3) {
-    setEnvironmentLoadStatus('fallback', 'using procedural room materials');
-  } else if (missingBaseMaps.length > 0) {
-    setEnvironmentLoadStatus('fallback', `partial texture fallback: ${missingBaseMaps.join(', ')}`);
+  const floorBaseOk = !!floorBaseTex;
+  const wallBaseOk = !!wallBaseTex;
+  const trimBaseOk = !!trimBaseTex;
+  const statusDetailParts = [
+    `env=${environmentId}`,
+    `floor=${floorBaseOk ? 'OK' : 'MISSING'}`,
+    `walls=${wallBaseOk ? 'OK' : 'MISSING'}`,
+    `trim=${trimBaseOk ? 'OK' : 'MISSING'}`,
+    `hdri=${hdriTex ? 'OK' : 'optional-missing'}`
+  ];
+  if (envStatus.missingMaps.length) {
+    statusDetailParts.push(`missingMaps=${envStatus.missingMaps.join(',')}`);
+  }
+  if (envStatus.firstFailedUrl) {
+    statusDetailParts.push(`firstFail=${envStatus.firstFailedUrl}`);
+  }
+  const statusDetail = statusDetailParts.join(' | ');
+  if (floorBaseOk && wallBaseOk && trimBaseOk) {
+    setEnvironmentLoadStatus('ok', statusDetail);
   } else {
-    setEnvironmentLoadStatus('ok');
+    setEnvironmentLoadStatus('fallback', statusDetail);
   }
 }
 
@@ -3995,7 +4158,7 @@ function applyEnvironment(environmentId) {
     ? 'casino_lounge'
     : (environmentCatalog[0]?.id || 'casino_lounge');
   const safeId = environmentById.has(environmentId) ? environmentId : fallbackEnvId;
-  if (currentEnvironmentId === safeId) return;
+  if (currentEnvironmentId === safeId && environmentLoadState === 'ok') return;
   currentEnvironmentId = safeId;
   environmentApplyToken += 1;
   const token = environmentApplyToken;
@@ -4514,9 +4677,11 @@ function setupSceneTuningControls() {
 
   resetSceneTuningBtn?.addEventListener('click', () => {
     applyDefaultSceneTuningSettings();
+    sceneTuningLoadSource = 'defaults';
     updateSceneTuningUi();
     persistSceneTuning();
     localStorage.removeItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
+    updateSettingsLoadedText();
     applySceneTuning({ rerenderHand: true });
     logMessage('Scene tuning reset.');
   });
@@ -4920,6 +5085,18 @@ function applySnapshot(room) {
   const prevSevenWinner = prevRoomState?.lastSevenMarksWinnerTeam || null;
   const prevLocalSeat = lastLocalSeat;
   roomState = room;
+  if (roomState?.betting?.isOpen || roomState?.phase === PHASES.BETTING) {
+    pendingBettingOpenEvent = {
+      handId: Number(roomState.betting?.handId || roomState.pendingBets?.handId || roomState.handNumber || 0),
+      defaultBet: Number(roomState.betting?.betAmount || roomState.pendingBets?.amount || roomState.baseBetAmount || 10),
+      betPot: Number(roomState.betting?.betPot || roomState.pendingBets?.pot || 0),
+      betState: roomState.betting?.betState && typeof roomState.betting.betState === 'object'
+        ? { ...roomState.betting.betState }
+        : (roomState.pendingBets?.responses ? { ...roomState.pendingBets.responses } : {})
+    };
+  } else {
+    pendingBettingOpenEvent = null;
+  }
 
   const newLocalSeat = getLocalSeat();
   lastLocalSeat = newLocalSeat;
@@ -4983,6 +5160,7 @@ function applySnapshot(room) {
 function resetRoomLocally() {
   roomState = null;
   lastLocalSeat = null;
+  pendingBettingOpenEvent = null;
   clearTimeoutPenaltyEmojis();
   closeBettingModal();
   applyEnvironment('casino_lounge');
@@ -5085,6 +5263,12 @@ function handleServerPacket(data) {
   }
 
   if (data.type === 'betting:open') {
+    pendingBettingOpenEvent = {
+      handId: Number(data.handId || roomState?.handNumber || 0),
+      defaultBet: Math.max(1, Number(data.defaultBet || roomState?.baseBetAmount || 10)),
+      betPot: Number(data.betPot || 0),
+      betState: data.betState && typeof data.betState === 'object' ? { ...data.betState } : {}
+    };
     if (roomState) {
       const handId = Number(data.handId || roomState.handNumber || 0);
       roomState.betting = {
@@ -5113,6 +5297,7 @@ function handleServerPacket(data) {
   }
 
   if (data.type === 'betting:close') {
+    pendingBettingOpenEvent = null;
     if (roomState?.betting) {
       roomState.betting.isOpen = false;
       roomState.betting.betPot = Number(data.betPot || roomState.betting.betPot || 0);
@@ -5177,6 +5362,7 @@ function connect() {
   });
 
   socketRef.on('disconnect', (reason) => {
+    pendingBettingOpenEvent = null;
     networkLastDisconnectReason = String(reason || 'disconnect');
     syncSocketInfoFromSingleton();
     updateSocketUi();

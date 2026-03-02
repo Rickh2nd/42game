@@ -469,3 +469,39 @@ Apply order / boot order:
 
 Validation:
 - `node --check client/main.js` ✅
+
+Update (stability follow-up after parse break + diagnostics lock):
+- Fixed client parse/runtime blocker in `currentBettingState()` by correcting `??`/`||` precedence in pot merge expression.
+- Added/kept settings source diagnostics line wiring (`Settings Loaded | view source | scene source`) and ensured reset flows force `defaults` source state.
+- Added betting diagnostics line updates so UI always shows `enabled/isOpen/handId/phase`.
+- Improved betting event resilience:
+  - caches pending `betting:open` payload (`pendingBettingOpenEvent`) for event/snapshot ordering races,
+  - clears cache on close/disconnect/reset,
+  - allows modal open state to derive from either snapshot or open event.
+- Updated betting modal position persistence key migration:
+  - new key `texas42_bet_modal_pos_v1`
+  - reads legacy key once and migrates.
+- Server betting lifecycle now broadcasts immediate full snapshots on open/close transitions in addition to socket events.
+
+Validation this pass:
+- `node --check client/main.js` pass.
+- `node --check server/server.js` pass.
+- Asset URL smoke (local server): all floor/walls/trim maps for
+  - casino_lounge
+  - spooky_parlor
+  - rustic_tavern
+  - modern_suite
+  - neon_arcade
+  return HTTP 200.
+- Betting lifecycle smoke on isolated server port:
+  - host enables betting,
+  - seat0 set cpu,
+  - start game,
+  - `betting:open` emitted and snapshot phase becomes `betting` (`isOpen=true`).
+
+Skill-loop note:
+- Attempted Playwright skill client run, but environment lacks `playwright` package (`ERR_MODULE_NOT_FOUND`), so automated screenshot/text-state validation is still blocked in this machine state.
+- Environment loader hardening:
+  - failed texture/HDR loads are no longer cached forever (failed cache entries are evicted),
+  - empty environment file catalog responses are no longer cached forever (evicted for retry),
+  - `applyEnvironment` now retries same env when last load state is not `ok` (prevents sticky fallback).

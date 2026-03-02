@@ -271,6 +271,7 @@
             <button id="resetViewBtn">Reset View</button>
             <button id="copyViewBtn">Copy View Settings</button>
           </div>
+          <div id="settingsLoadText" class="smallText">Settings Loaded | view: defaults | scene: defaults</div>
         </section>
 
         <section id="section-scene-tuning" class="panelSection">
@@ -361,6 +362,7 @@
             <span id="bet_amount_val" class="viewVal">10</span>
           </div>
           <div id="bettingStateText" class="smallText">Betting Off</div>
+          <div id="bettingDebugText" class="smallText">Betting Debug | enabled: false | isOpen: false | handId: -</div>
           <div id="bettingTotals" class="smallText"></div>
         </section>
 
@@ -443,7 +445,7 @@
       </div>
     </div>
 
-    <div id="bettingModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Betting popup">
+    <div id="betModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Betting popup">
       <div class="modalBackdrop actionModalBackdrop"></div>
       <div class="modalPanel actionModalPanel bettingModalPanel">
         <div class="modalHeader">
