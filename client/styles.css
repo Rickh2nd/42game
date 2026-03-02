@@ -501,7 +501,7 @@ body,
   right: 0;
   top: 0;
   height: 100%;
-  width: min(380px, 92vw);
+  width: min(430px, 94vw);
   background: var(--panel);
   border-left: 1px solid var(--panel-border);
   backdrop-filter: blur(4px);
@@ -605,6 +605,11 @@ body,
   color: #ff9c9c;
 }
 
+#environmentLoadText {
+  margin-top: 4px;
+  color: #f4d49b;
+}
+
 .modal {
   position: fixed;
   inset: 0;
@@ -704,8 +709,17 @@ body,
 .viewControl input[type="range"] {
   grid-column: 1 / 2;
   width: 100%;
+  min-width: 240px;
   accent-color: #dcb56a;
   padding: 0;
+}
+
+.viewControl input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px;
+}
+
+.viewControl input[type="range"]::-moz-range-track {
+  height: 8px;
 }
 
 .viewVal {

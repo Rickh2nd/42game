@@ -161,3 +161,38 @@ Validation performed:
 Remaining TODOs:
 - Visual pass in browser to fine-tune hand arc/spacing defaults if needed after flat-tile switch.
 - If real casino textures/HDRI are available locally, place them in the new folder and verify auto-detection mapping picks them.
+
+Update (reference-style domino + casino fallback + larger slider ranges):
+- Increased domino tuning ranges in `/client/index.html` + JS clamps:
+  - `hand_domino_scale`: 0.05..12.00 (step 0.05)
+  - `table_domino_scale`: 0.05..12.00 (step 0.05)
+- Added larger slider usability tweaks in `/client/styles.css`:
+  - wider side panel
+  - larger range track and min-width for sliders.
+- Burn pile stack container IDs now match vertical hand-stack contract:
+  - `burn-hands-team1`, `burn-hands-team2`
+- Burn panel render now emphasizes completed hand-history stacks only (newest on top), removing in-progress horizontal-like behavior.
+- Domino visual renderer upgraded to better match provided reference image:
+  - stronger ivory/yellow tone
+  - rounded corners via clipping path
+  - darker/thicker divider
+  - glossy black pip treatment + inset/shadow feel
+  - applied consistently to hand, burn, and played textures.
+- Played dominos switched to flat tile render path for visual consistency with hand/burn style target.
+- Hand layout now includes soft large-scale handling:
+  - when hand tile scale is huge, hand anchor shifts to keep visibility
+  - adaptive effective scale reduction only when overflow persists.
+- Casino lounge environment load robustness:
+  - added UI load status line (`environmentLoadText`) with exact states:
+    - `Environment loaded: OK`
+    - `Environment fallback: ...`
+  - room shell always renders for casino lounge (floor/walls/baseboards) regardless of missing assets.
+  - missing texture/HDR detection logs warnings and sets fallback status.
+
+Validation this pass:
+- `node --check client/main.js` pass
+- `node --check server/server.js` pass
+- local smoke on `PORT=18103`:
+  - `/health` OK
+  - `/api/environment-files/casino_lounge` OK
+  - socket.io polling handshake OK

@@ -47,7 +47,7 @@
               <div class="burnPanelTitle" id="burn-title-team1">TEAM 1 BURN PILE</div>
               <div class="burnPanelStats" id="burn-stats-team1">Tiles: 0 | Count pts: 0 | Hand: 0</div>
               <div class="burnRowWrap">
-                <div class="burnHandsStack" id="burn-row-team1"></div>
+                <div class="burnHandsStack" id="burn-hands-team1"></div>
                 <div class="smallText hidden" id="burn-overflow-team1"></div>
               </div>
               <div class="burnFooterTag" id="burn-footer-team1">
@@ -62,7 +62,7 @@
               <div class="burnPanelTitle" id="burn-title-team2">TEAM 2 BURN PILE</div>
               <div class="burnPanelStats" id="burn-stats-team2">Tiles: 0 | Count pts: 0 | Hand: 0</div>
               <div class="burnRowWrap">
-                <div class="burnHandsStack" id="burn-row-team2"></div>
+                <div class="burnHandsStack" id="burn-hands-team2"></div>
                 <div class="smallText hidden" id="burn-overflow-team2"></div>
               </div>
               <div class="burnFooterTag" id="burn-footer-team2">
@@ -177,6 +177,7 @@
             <select id="environmentSelect"></select>
             <img id="environmentPreview" alt="Background preview" />
             <div id="environmentStateText" class="smallText"></div>
+            <div id="environmentLoadText" class="smallText"></div>
           </div>
         </section>
 
@@ -234,7 +235,7 @@
           </div>
           <div class="viewControl">
             <label for="hand_domino_scale">Hand Domino Size</label>
-            <input id="hand_domino_scale" type="range" min="0.20" max="3.00" step="0.01" />
+            <input id="hand_domino_scale" type="range" min="0.05" max="12.00" step="0.05" />
             <span id="hand_domino_scale_val" class="viewVal">1.00</span>
           </div>
           <div class="viewControl">
@@ -244,7 +245,7 @@
           </div>
           <div class="viewControl">
             <label for="table_domino_scale">Played Domino Size</label>
-            <input id="table_domino_scale" type="range" min="0.20" max="3.00" step="0.01" />
+            <input id="table_domino_scale" type="range" min="0.05" max="12.00" step="0.05" />
             <span id="table_domino_scale_val" class="viewVal">1.00</span>
           </div>
           <div class="buttonRow">

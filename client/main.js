@@ -70,6 +70,7 @@ const tableDominoDebugReadout = document.getElementById('tableDominoDebugReadout
 const environmentSelect = document.getElementById('environmentSelect');
 const environmentPreview = document.getElementById('environmentPreview');
 const environmentStateText = document.getElementById('environmentStateText');
+const environmentLoadText = document.getElementById('environmentLoadText');
 const emojiOverlays = document.getElementById('emojiOverlays');
 const networkStatusValue = document.getElementById('networkStatusValue');
 const networkUrlValue = document.getElementById('networkUrlValue');
@@ -354,6 +355,8 @@ const environmentCatalog = [];
 const environmentById = new Map();
 let currentEnvironmentId = null;
 let environmentApplyToken = 0;
+let environmentLoadState = 'idle';
+let environmentLoadDetail = '';
 
 const timeoutPenaltyBySeat = new Map();
 const tempV3C = new THREE.Vector3();
@@ -1401,6 +1404,17 @@ function drawPipSetInCell(ctx, value, cell, color) {
   }
 }
 
+function roundedRectPath(ctx, x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, Math.min(w, h) * 0.5));
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
 function drawDominoFaceCanvas(ctx, width, height, tile, {
   faceUp = true,
   glowCount = false,
@@ -1409,17 +1423,26 @@ function drawDominoFaceCanvas(ctx, width, height, tile, {
   orientation = 'landscape'
 } = {}) {
   ctx.clearRect(0, 0, width, height);
+  const corner = Math.max(12, Math.min(width, height) * 0.09);
+  const inset = Math.max(6, Math.min(width, height) * 0.04);
+  const bodyX = inset;
+  const bodyY = inset;
+  const bodyW = width - inset * 2;
+  const bodyH = height - inset * 2;
+
   if (!faceUp || !tile) {
     const backGrad = ctx.createLinearGradient(0, 0, width, height);
     backGrad.addColorStop(0, '#2e3e4e');
     backGrad.addColorStop(1, '#182431');
+    roundedRectPath(ctx, bodyX, bodyY, bodyW, bodyH, corner);
     ctx.fillStyle = backGrad;
-    ctx.fillRect(0, 0, width, height);
+    ctx.fill();
     ctx.strokeStyle = 'rgba(129, 160, 193, 0.72)';
     ctx.lineWidth = Math.max(2, width * 0.014);
-    ctx.strokeRect(7, 7, width - 14, height - 14);
+    roundedRectPath(ctx, bodyX + 2, bodyY + 2, bodyW - 4, bodyH - 4, corner * 0.92);
+    ctx.stroke();
     for (let i = 0; i < 12; i += 1) {
-      const x = 14 + ((i + 0.5) * (width - 28) / 12);
+      const x = bodyX + 14 + ((i + 0.5) * (bodyW - 28) / 12);
       const y = height * 0.5 + (i % 2 === 0 ? -height * 0.08 : height * 0.08);
       ctx.fillStyle = 'rgba(122, 151, 182, 0.35)';
       ctx.beginPath();
@@ -1430,39 +1453,58 @@ function drawDominoFaceCanvas(ctx, width, height, tile, {
   }
 
   const pattern = ctx.createPattern(ivoryPatternCanvas, 'repeat');
-  const baseGrad = ctx.createLinearGradient(0, 0, 0, height);
-  baseGrad.addColorStop(0, '#f3ebdd');
-  baseGrad.addColorStop(1, '#e6dac5');
+  const baseGrad = ctx.createLinearGradient(0, bodyY, 0, bodyY + bodyH);
+  baseGrad.addColorStop(0, '#f4eebd');
+  baseGrad.addColorStop(0.45, '#ece2ab');
+  baseGrad.addColorStop(1, '#dfd59d');
+  roundedRectPath(ctx, bodyX, bodyY, bodyW, bodyH, corner);
   ctx.fillStyle = baseGrad;
-  ctx.fillRect(0, 0, width, height);
+  ctx.fill();
   if (pattern) {
-    ctx.globalAlpha = 0.24;
+    ctx.save();
+    roundedRectPath(ctx, bodyX, bodyY, bodyW, bodyH, corner);
+    ctx.clip();
+    ctx.globalAlpha = 0.2;
     ctx.fillStyle = pattern;
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(bodyX, bodyY, bodyW, bodyH);
     ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
-  const vignette = ctx.createRadialGradient(width * 0.5, height * 0.45, Math.min(width, height) * 0.15, width * 0.5, height * 0.45, Math.max(width, height) * 0.7);
+  const vignette = ctx.createRadialGradient(width * 0.5, height * 0.45, Math.min(width, height) * 0.12, width * 0.5, height * 0.45, Math.max(width, height) * 0.72);
   vignette.addColorStop(0, 'rgba(255,255,255,0)');
-  vignette.addColorStop(1, 'rgba(86,64,43,0.13)');
+  vignette.addColorStop(1, 'rgba(72,51,34,0.19)');
+  ctx.save();
+  roundedRectPath(ctx, bodyX, bodyY, bodyW, bodyH, corner);
+  ctx.clip();
   ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, width, height);
+  ctx.fillRect(bodyX, bodyY, bodyW, bodyH);
+  const edgeGlow = ctx.createLinearGradient(bodyX, bodyY, bodyX, bodyY + bodyH);
+  edgeGlow.addColorStop(0, 'rgba(255,255,255,0.22)');
+  edgeGlow.addColorStop(0.14, 'rgba(255,255,255,0)');
+  edgeGlow.addColorStop(0.86, 'rgba(0,0,0,0)');
+  edgeGlow.addColorStop(1, 'rgba(82,54,31,0.18)');
+  ctx.fillStyle = edgeGlow;
+  ctx.fillRect(bodyX, bodyY, bodyW, bodyH);
+  ctx.restore();
 
-  const border = Math.max(2.5, Math.min(width, height) * 0.022);
-  ctx.strokeStyle = '#5a4735';
+  const border = Math.max(2.8, Math.min(width, height) * 0.028);
+  ctx.strokeStyle = '#3a2f25';
   ctx.lineWidth = border;
-  ctx.strokeRect(border, border, width - border * 2, height - border * 2);
+  roundedRectPath(ctx, bodyX, bodyY, bodyW, bodyH, corner);
+  ctx.stroke();
 
   if (glowCount) {
     ctx.shadowColor = 'rgba(255,210,109,0.8)';
     ctx.shadowBlur = Math.max(8, width * 0.05);
     ctx.strokeStyle = 'rgba(255,213,112,0.95)';
     ctx.lineWidth = Math.max(3, border * 1.35);
-    ctx.strokeRect(border, border, width - border * 2, height - border * 2);
+    roundedRectPath(ctx, bodyX, bodyY, bodyW, bodyH, corner);
+    ctx.stroke();
     ctx.shadowBlur = 0;
   }
 
-  const pipDark = '#171513';
+  const pipDark = '#090909';
   const pipMagenta = '#cf3df6';
   const isPortrait = orientation === 'portrait';
   const sideAColor = mode === MODES.TRUMPS && trumpSuit != null && tile.a === trumpSuit ? pipMagenta : pipDark;
@@ -1470,43 +1512,43 @@ function drawDominoFaceCanvas(ctx, width, height, tile, {
 
   if (isPortrait) {
     const splitY = height * 0.5;
-    ctx.strokeStyle = '#5f4a37';
-    ctx.lineWidth = Math.max(2, border * 0.75);
+    ctx.strokeStyle = '#1f1b16';
+    ctx.lineWidth = Math.max(3.5, border * 1.2);
     ctx.beginPath();
-    ctx.moveTo(border + 2, splitY);
-    ctx.lineTo(width - border - 2, splitY);
+    ctx.moveTo(bodyX + (bodyW * 0.11), splitY);
+    ctx.lineTo(bodyX + bodyW - (bodyW * 0.11), splitY);
     ctx.stroke();
     drawPipSetInCell(ctx, tile.a, {
       cx: width * 0.5,
       cy: height * 0.25,
-      w: width * 0.68,
-      h: height * 0.36
+      w: width * 0.62,
+      h: height * 0.34
     }, sideAColor);
     drawPipSetInCell(ctx, tile.b, {
       cx: width * 0.5,
       cy: height * 0.75,
-      w: width * 0.68,
-      h: height * 0.36
+      w: width * 0.62,
+      h: height * 0.34
     }, sideBColor);
   } else {
     const splitX = width * 0.5;
-    ctx.strokeStyle = '#5f4a37';
-    ctx.lineWidth = Math.max(2, border * 0.75);
+    ctx.strokeStyle = '#1f1b16';
+    ctx.lineWidth = Math.max(3.5, border * 1.2);
     ctx.beginPath();
-    ctx.moveTo(splitX, border + 2);
-    ctx.lineTo(splitX, height - border - 2);
+    ctx.moveTo(splitX, bodyY + (bodyH * 0.11));
+    ctx.lineTo(splitX, bodyY + bodyH - (bodyH * 0.11));
     ctx.stroke();
     drawPipSetInCell(ctx, tile.a, {
       cx: width * 0.25,
       cy: height * 0.5,
-      w: width * 0.34,
-      h: height * 0.7
+      w: width * 0.32,
+      h: height * 0.64
     }, sideAColor);
     drawPipSetInCell(ctx, tile.b, {
       cx: width * 0.75,
       cy: height * 0.5,
-      w: width * 0.34,
-      h: height * 0.7
+      w: width * 0.32,
+      h: height * 0.64
     }, sideBColor);
   }
 }
@@ -1563,50 +1605,14 @@ function renderBurnPanel(team, data) {
 
   const titleTeam = team === 'teamA' ? 'TEAM 1 BURN PILE' : 'TEAM 2 BURN PILE';
   const handRecords = Array.isArray(data.handRecords) ? data.handRecords : [];
-  const activeHandTiles = Array.isArray(data.currentTiles) ? data.currentTiles : [];
-  const totalTiles = handRecords.reduce((sum, record) => sum + (record.tiles?.length || 0), 0) + activeHandTiles.length;
-  const totalCountPoints = handRecords.reduce((sum, record) => sum + Number(record.countPoints || 0), 0)
-    + activeHandTiles.reduce((sum, tile) => sum + countTilePoints(tile), 0);
+  const totalTiles = handRecords.reduce((sum, record) => sum + (record.tiles?.length || 0), 0);
+  const totalCountPoints = handRecords.reduce((sum, record) => sum + Number(record.countPoints || 0), 0);
   const handWins = Number(data.handWins || 0);
   panel.title.textContent = titleTeam;
   panel.stats.textContent = `Tiles: ${totalTiles} | Count pts: ${totalCountPoints} | Hand: ${handWins}`;
 
   panel.stack.replaceChildren();
-  if (activeHandTiles.length > 0) {
-    const currentRow = document.createElement('div');
-    currentRow.className = 'burnHandRow';
-    const header = document.createElement('div');
-    header.className = 'burnHandHeader';
-    const label = document.createElement('span');
-    label.textContent = 'CURRENT HAND';
-    const pts = document.createElement('span');
-    pts.className = 'burnHandPts';
-    const activePoints = activeHandTiles.reduce((sum, tile) => sum + countTilePoints(tile), 0);
-    pts.textContent = `+${activePoints} pts`;
-    header.append(label, pts);
-
-    const tilesRow = document.createElement('div');
-    tilesRow.className = 'burnHandTilesRow';
-    const rowTiles = activeHandTiles.slice(0, 4);
-    for (const tile of rowTiles) {
-      tilesRow.appendChild(buildBurnDominoTile(tile, {
-        highlightCount: countTilePoints(tile) > 0,
-        mode: data.mode,
-        trumpSuit: data.trumpSuit
-      }));
-    }
-    const overflow = Math.max(0, activeHandTiles.length - rowTiles.length);
-    if (overflow > 0) {
-      const badge = document.createElement('span');
-      badge.className = 'burnOverflowBadge';
-      badge.textContent = `+${overflow}`;
-      tilesRow.appendChild(badge);
-    }
-    currentRow.append(header, tilesRow);
-    panel.stack.appendChild(currentRow);
-  }
-
-  if (!handRecords.length && activeHandTiles.length === 0) {
+  if (!handRecords.length) {
     const empty = document.createElement('div');
     empty.className = 'burnHandRow';
     empty.innerHTML = '<div class="burnHandHeader"><span>No completed hands yet</span><span class="burnHandPts">+0 pts</span></div>';
@@ -1659,21 +1665,19 @@ function renderBurnPanel(team, data) {
 
 function updateBurnPanels() {
   if (!roomState) {
-    renderBurnPanel('teamA', { handRecords: [], currentTiles: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
-    renderBurnPanel('teamB', { handRecords: [], currentTiles: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
+    renderBurnPanel('teamA', { handRecords: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
+    renderBurnPanel('teamB', { handRecords: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
     return;
   }
 
   renderBurnPanel('teamA', {
     handRecords: roomState.burnHandsTeamA || [],
-    currentTiles: roomState.burnPiles?.teamA || [],
     handWins: roomState.roundWins?.teamA || 0,
     mode: roomState.mode || MODES.TRUMPS,
     trumpSuit: roomState.trumpSuit
   });
   renderBurnPanel('teamB', {
     handRecords: roomState.burnHandsTeamB || [],
-    currentTiles: roomState.burnPiles?.teamB || [],
     handWins: roomState.roundWins?.teamB || 0,
     mode: roomState.mode || MODES.TRUMPS,
     trumpSuit: roomState.trumpSuit
@@ -1742,7 +1746,8 @@ function createDomino3D(tile, options = {}) {
     scale = DOMINO_SCALE,
     glowCount = false,
     trumpSuit = null,
-    useMagentaTrump = false
+    useMagentaTrump = false,
+    mode = MODES.TRUMPS
   } = options;
 
   const trumpTintSuit = useMagentaTrump && trumpSuit != null ? trumpSuit : null;
@@ -1750,7 +1755,7 @@ function createDomino3D(tile, options = {}) {
     faceUp,
     glowCount,
     trumpSuit: trumpTintSuit,
-    mode: MODES.TRUMPS,
+    mode,
     orientation: 'landscape'
   });
   const bottomTexture = getDominoTexture(tile, {
@@ -1786,15 +1791,17 @@ function createDominoTile(tile, options = {}) {
     scale = 1,
     glowCount = false,
     trumpSuit = null,
-    useMagentaTrump = false
+    useMagentaTrump = false,
+    mode = MODES.TRUMPS,
+    orientation = 'portrait'
   } = options;
   const trumpTintSuit = useMagentaTrump && trumpSuit != null ? trumpSuit : null;
   const texture = getDominoTexture(tile, {
     faceUp,
     glowCount,
     trumpSuit: trumpTintSuit,
-    mode: MODES.TRUMPS,
-    orientation: 'portrait'
+    mode,
+    orientation
   });
 
   const material = getDominoBaseMaterial({ faceUp, map: texture, flat: true });
@@ -2263,9 +2270,9 @@ function sanitizeViewSettings() {
   viewSettings.near = clampValue(Number(viewSettings.near), 0.001, 1.0);
   viewSettings.handY = clampValue(Number(viewSettings.handY), -1.0, 1.0);
   viewSettings.handZ = clampValue(Number(viewSettings.handZ), -4.0, 4.0);
-  viewSettings.handDominoScale = clampValue(Number(viewSettings.handDominoScale), 0.2, 3.0);
+  viewSettings.handDominoScale = clampValue(Number(viewSettings.handDominoScale), 0.05, 12.0);
   viewSettings.handDominoRotDeg = clampValue(Number(viewSettings.handDominoRotDeg), -180, 180);
-  viewSettings.tableDominoScale = clampValue(Number(viewSettings.tableDominoScale), 0.2, 3.0);
+  viewSettings.tableDominoScale = clampValue(Number(viewSettings.tableDominoScale), 0.05, 12.0);
 }
 
 function updateViewControlsUi() {
@@ -2533,6 +2540,22 @@ function updatePenaltyEmojiPositions() {
 
 function getThemePreset(environmentId) {
   return ENV_THEME_PRESETS[environmentId] || ENV_THEME_PRESETS.default_lounge;
+}
+
+function setEnvironmentLoadStatus(state, detail = '') {
+  environmentLoadState = state;
+  environmentLoadDetail = detail;
+  if (environmentLoadText) {
+    if (state === 'loading') {
+      environmentLoadText.textContent = 'Environment loading...';
+    } else if (state === 'ok') {
+      environmentLoadText.textContent = 'Environment loaded: OK';
+    } else if (state === 'fallback') {
+      environmentLoadText.textContent = `Environment fallback: ${detail || 'missing HDR/texture'}`;
+    } else {
+      environmentLoadText.textContent = '';
+    }
+  }
 }
 
 function getSkyTexture(environmentId, top, bottom) {
@@ -2807,6 +2830,11 @@ async function buildCasinoLoungeEnvironment(entry, token) {
   const catalog = await fetchEnvironmentFiles(entry);
   if (token !== environmentApplyToken) return;
   const mapped = mapCasinoLoungeAssets(catalog);
+  const missing = [];
+  if (!mapped.floor.base) missing.push('missing floor texture');
+  if (!mapped.walls.base) missing.push('missing wall texture');
+  if (!mapped.trim.base) missing.push('missing trim texture');
+  if (!mapped.hdri) missing.push('missing HDR');
 
   const [floorBase, floorNormal, floorRough, wallBase, wallNormal, wallRough, trimBase, trimNormal, trimRough] = await Promise.all([
     loadEnvironmentTexture(mapped.floor.base, { srgb: true, repeat: [10, 12] }),
@@ -2823,16 +2851,19 @@ async function buildCasinoLoungeEnvironment(entry, token) {
   if (token !== environmentApplyToken) return;
 
   if (floorBase) floorMaterial.map = floorBase;
+  else missing.push('floor map load failed');
   if (floorNormal) floorMaterial.normalMap = floorNormal;
   if (floorRough) floorMaterial.roughnessMap = floorRough;
   floorMaterial.needsUpdate = true;
 
   if (wallBase) wallMaterial.map = wallBase;
+  else missing.push('wall map load failed');
   if (wallNormal) wallMaterial.normalMap = wallNormal;
   if (wallRough) wallMaterial.roughnessMap = wallRough;
   wallMaterial.needsUpdate = true;
 
   if (trimBase) trimMaterial.map = trimBase;
+  else missing.push('trim map load failed');
   if (trimNormal) trimMaterial.normalMap = trimNormal;
   if (trimRough) trimMaterial.roughnessMap = trimRough;
   trimMaterial.needsUpdate = true;
@@ -2842,6 +2873,8 @@ async function buildCasinoLoungeEnvironment(entry, token) {
     if (token !== environmentApplyToken) return;
     if (hdriTex) {
       scene.environment = hdriTex;
+    } else {
+      missing.push('HDR load failed');
     }
   }
 
@@ -2873,6 +2906,13 @@ async function buildCasinoLoungeEnvironment(entry, token) {
   }
 
   if (token !== environmentApplyToken) return;
+  const dedupedMissing = [...new Set(missing)];
+  if (dedupedMissing.length) {
+    console.warn('[env] Casino Lounge fallback assets:', dedupedMissing.join(', '));
+    setEnvironmentLoadStatus('fallback', dedupedMissing.join(', '));
+  } else {
+    setEnvironmentLoadStatus('ok');
+  }
 }
 
 function applyEnvironment(environmentId) {
@@ -2881,6 +2921,7 @@ function applyEnvironment(environmentId) {
   currentEnvironmentId = safeId;
   environmentApplyToken += 1;
   const token = environmentApplyToken;
+  setEnvironmentLoadStatus('loading');
 
   clearGroup(themeGroup);
   const preset = getThemePreset(safeId);
@@ -2917,6 +2958,7 @@ function applyEnvironment(environmentId) {
         new THREE.MeshBasicMaterial({ map: fallbackSky, side: THREE.BackSide, depthWrite: false })
       );
       themeGroup.add(dome);
+      setEnvironmentLoadStatus('fallback', 'missing HDR/texture');
     });
     updateEnvironmentControls();
     return;
@@ -3050,6 +3092,7 @@ function applyEnvironment(environmentId) {
   }
 
   themeGroup.add(backgroundStage);
+  setEnvironmentLoadStatus('ok');
   updateEnvironmentControls();
 }
 
@@ -3120,11 +3163,12 @@ function layoutPlayerHandDominos(seatId, dominos, settings) {
 
   base.y = Math.max(base.y, tableMetrics.topY + 0.03);
 
-  const handScale = Number(settings.handDominoScale) || 1;
+  const handScale = Math.max(0.05, Number(settings.handDominoScale) || 1);
   const handRotateRad = THREE.MathUtils.degToRad(Number(settings.handDominoRotDeg) || 0);
   const n = dominos.length;
-  const dominoWidth = DOMINO_SHORT * handScale;
-  const baseSpacing = dominoWidth + 0.008;
+  let effectiveScale = handScale;
+  let dominoWidth = DOMINO_SHORT * effectiveScale;
+  let baseSpacing = dominoWidth + 0.008;
   let spacing = Math.max(baseSpacing, dominoWidth * 1.1);
   let arcStrength = 0.16;
   const liftY = 0.016 + DOMINO_TILE_THICKNESS;
@@ -3132,11 +3176,20 @@ function layoutPlayerHandDominos(seatId, dominos, settings) {
   const baseRot = Math.atan2(basis.forward.z, basis.forward.x);
   const meshes = [];
 
+  if (handScale > 1.2) {
+    base.addScaledVector(basis.forward, (handScale - 1.2) * 0.1);
+    base.y -= Math.min(0.16, (handScale - 1.2) * 0.018);
+  }
+
   for (const tile of dominos) {
     const mesh = createDominoTile(tile, {
       faceUp: true,
       glowCount: countTilePoints(tile) > 0,
-      scale: handScale
+      scale: effectiveScale,
+      trumpSuit: roomState?.trumpSuit,
+      useMagentaTrump: roomState?.mode === MODES.TRUMPS,
+      mode: roomState?.mode || MODES.TRUMPS,
+      orientation: 'portrait'
     });
     mesh.userData.tileId = tile.id;
     mesh.userData.seatIndex = seatId;
@@ -3193,6 +3246,15 @@ function layoutPlayerHandDominos(seatId, dominos, settings) {
       const maxFitSpacing = n > 1 ? Math.max(0.02, (window.innerWidth * 0.00016) / (n - 1)) : spacing;
       spacing = Math.max(Math.min(maxFitSpacing, spacing * 0.92), dominoWidth * 1.1);
       arcStrength = Math.max(0.1, arcStrength * 0.94);
+      if (spacing <= (dominoWidth * 1.1 + 0.0005) && effectiveScale > 0.08) {
+        effectiveScale = Math.max(0.08, effectiveScale * 0.92);
+        dominoWidth = DOMINO_SHORT * effectiveScale;
+        baseSpacing = dominoWidth + 0.008;
+        spacing = Math.max(baseSpacing, dominoWidth * 1.1);
+        for (const mesh of meshes) {
+          mesh.scale.setScalar(effectiveScale);
+        }
+      }
     }
     if (overflowBottom) {
       base.addScaledVector(basis.forward, 0.08);
@@ -3235,8 +3297,8 @@ function renderTableTrick(trick) {
 
   const localSeat = getLocalSeat();
   const radius = Math.max(0.22, Math.min(0.46, tableMetrics.radius * 0.11));
-  const centerY = tableMetrics.topY + 0.012;
-  const tableScale = Number(viewSettings.tableDominoScale) || 1;
+  const tableScale = Math.max(0.05, Number(viewSettings.tableDominoScale) || 1);
+  const centerY = tableMetrics.topY + Math.max(0.007, DOMINO_TILE_THICKNESS * tableScale * 0.8);
 
   for (const play of plays) {
     const rel = toRelativeSeat(play.seatIndex, localSeat);
@@ -3247,11 +3309,13 @@ function renderTableTrick(trick) {
       { x: -radius, z: 0 }
     ][rel] || { x: 0, z: 0 };
 
-    const mesh = createDomino3D(play.tile, {
+    const mesh = createDominoTile(play.tile, {
       faceUp: true,
       glowCount: countTilePoints(play.tile) > 0,
       trumpSuit: roomState?.trumpSuit,
       useMagentaTrump: roomState?.mode === MODES.TRUMPS,
+      mode: roomState?.mode || MODES.TRUMPS,
+      orientation: 'portrait',
       scale: tableScale
     });
     mesh.position.set(cross.x, centerY, cross.z);
@@ -3384,6 +3448,7 @@ function updateEnvironmentControls() {
     environmentSelect.disabled = true;
     environmentPreview.removeAttribute('src');
     environmentStateText.textContent = 'Loading backgrounds...';
+    setEnvironmentLoadStatus('loading');
     return;
   }
 
@@ -3412,6 +3477,9 @@ function updateEnvironmentControls() {
     environmentStateText.textContent = `Host selected: ${entry?.name || safeId}`;
   } else {
     environmentStateText.textContent = `Host controls background (${entry?.name || safeId})`;
+  }
+  if (!environmentLoadText?.textContent) {
+    setEnvironmentLoadStatus(environmentLoadState || 'idle', environmentLoadDetail || '');
   }
 }
 
@@ -4287,14 +4355,16 @@ function ensureButtons() {
 
   spawnTestDominoBtn?.addEventListener('click', () => {
     const testTile = { a: 6, b: 4, id: '6-4' };
-    const mesh = createDomino3D(testTile, {
+    const mesh = createDominoTile(testTile, {
       faceUp: true,
       glowCount: true,
       trumpSuit: roomState?.trumpSuit,
       useMagentaTrump: roomState?.mode === MODES.TRUMPS,
-      scale: Number(viewSettings.tableDominoScale) || 1
+      mode: roomState?.mode || MODES.TRUMPS,
+      orientation: 'portrait',
+      scale: Math.max(0.05, Number(viewSettings.tableDominoScale) || 1)
     });
-    mesh.position.set(0, tableMetrics.topY + 0.02, 0);
+    mesh.position.set(0, tableMetrics.topY + Math.max(0.008, DOMINO_TILE_THICKNESS * 0.8), 0);
     mesh.rotation.y = 0;
     tablePlayRoot.add(mesh);
     if (showTableDominoBounds) {
