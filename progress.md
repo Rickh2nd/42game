@@ -431,3 +431,41 @@ Validation run:
 
 TODO (next pass if needed):
 - Run headed browser check for env switching visuals and burn panel instant-clear UX timing in a live hand.
+
+Update (lock-in defaults for View + Scene Tuning):
+- Locked `DEFAULT_VIEW_SETTINGS` to Rick-approved values in `/client/main.js`:
+  - distance 9.58, height 7.88, forward 5.86, shoulder -0.26, lookAtY -0.26,
+  - fov 63, pitchDeg 0, near 0.08,
+  - handY 0.49, handZ 0.54,
+  - handDominoScale 16.86, handDominoRotDeg 88,
+  - tableDominoScale 24.81, tableDominoTiltDeg 16.5.
+- Locked `DEFAULT_SCENE_TUNING` to Rick-approved values including per-seat avatar Y offsets:
+  - tableScale 2.1, chairScale 1.79, avatarScale 1.76,
+  - seatRadius 5.96, avatarBack -0.39, avatarY -0.01,
+  - chairY 0.01, tableY 0,
+  - seatAvatarYOffset [3.47, 3.46, 3.39, 3.2].
+
+Storage/version behavior:
+- Added settings versioning constants:
+  - `VIEW_SETTINGS_VERSION = 2`
+  - `SCENE_TUNING_VERSION = 2`
+- View storage (`texas42_view_settings_v1`):
+  - if missing/invalid: apply defaults and write once.
+  - if present: preserve saved values, sanitize, and migrate payload to v2 format.
+- Scene storage (`texas42_scene_tuning_v1`):
+  - now includes `seatAvatarYOffset` in the same payload.
+  - if missing/invalid: apply defaults and write once.
+  - migration path reads legacy `texas42_avatar_y_offsets_v1` and folds it into scene payload, then removes legacy key.
+
+Reset behavior:
+- Reset View now overwrites storage with the locked default view and applies immediately.
+- Reset Scene Tuning now overwrites storage with locked default scene tuning (including seat offsets) and applies immediately.
+- Both reset paths update slider inputs and value labels immediately.
+
+Apply order / boot order:
+- Boot sequence now loads scene tuning before view settings.
+- UI sync order updated so scene tuning UI refreshes before view UI.
+- Environment model load path still applies scene transforms first, then camera/view pose, matching required dependency order.
+
+Validation:
+- `node --check client/main.js` ✅

@@ -48,6 +48,8 @@ const BETTING_MODAL_STORAGE_KEY = 'texas42_betting_modal_v1';
 const MUTE_STORAGE_KEY = 'texas42_mute_v1';
 const PLAYER_ID_STORAGE_KEY = 'texas42_player_id';
 const CLIENT_VERSION = '1.0.0';
+const VIEW_SETTINGS_VERSION = 2;
+const SCENE_TUNING_VERSION = 2;
 
 const canvas = document.getElementById('gameCanvas');
 const panel = document.getElementById('sidePanel');
@@ -407,37 +409,58 @@ const tempV3C = new THREE.Vector3();
 const tempV3D = new THREE.Vector3();
 
 const DEFAULT_VIEW_SETTINGS = {
-  distance: 1.85,
-  height: 1.24,
-  forward: -0.08,
-  shoulder: 0.19,
-  lookAtY: 0.78,
-  fov: 47,
-  pitchDeg: -2.5,
+  distance: 9.58,
+  height: 7.88,
+  forward: 5.86,
+  shoulder: -0.26,
+  lookAtY: -0.26,
+  fov: 63,
+  pitchDeg: 0,
   near: 0.08,
-  handY: 0.02,
-  handZ: 0.0,
-  handDominoScale: 1.0,
-  handDominoRotDeg: 0,
-  tableDominoScale: 1.0,
-  tableDominoTiltDeg: 10.0
+  handY: 0.49,
+  handZ: 0.54,
+  handDominoScale: 16.86,
+  handDominoRotDeg: 88,
+  tableDominoScale: 24.81,
+  tableDominoTiltDeg: 16.5
 };
 
 const viewSettings = { ...DEFAULT_VIEW_SETTINGS };
 
 const DEFAULT_SCENE_TUNING = {
-  tableScale: 1.46,
-  chairScale: 1.0,
-  avatarScale: 1.0,
-  seatRadius: 3.12,
-  avatarBack: 0.0,
-  avatarY: 0.0,
-  chairY: 0.0,
-  tableY: 0.0
+  tableScale: 2.1,
+  chairScale: 1.79,
+  avatarScale: 1.76,
+  seatRadius: 5.96,
+  avatarBack: -0.39,
+  avatarY: -0.01,
+  chairY: 0.01,
+  tableY: 0,
+  seatAvatarYOffset: [3.47, 3.46, 3.39, 3.2]
 };
 
-const sceneTuning = { ...DEFAULT_SCENE_TUNING };
-const avatarSeatYOffsets = [0, 0, 0, 0];
+const SCENE_TUNING_NUMERIC_KEYS = [
+  'tableScale',
+  'chairScale',
+  'avatarScale',
+  'seatRadius',
+  'avatarBack',
+  'avatarY',
+  'chairY',
+  'tableY'
+];
+
+const sceneTuning = {
+  tableScale: DEFAULT_SCENE_TUNING.tableScale,
+  chairScale: DEFAULT_SCENE_TUNING.chairScale,
+  avatarScale: DEFAULT_SCENE_TUNING.avatarScale,
+  seatRadius: DEFAULT_SCENE_TUNING.seatRadius,
+  avatarBack: DEFAULT_SCENE_TUNING.avatarBack,
+  avatarY: DEFAULT_SCENE_TUNING.avatarY,
+  chairY: DEFAULT_SCENE_TUNING.chairY,
+  tableY: DEFAULT_SCENE_TUNING.tableY
+};
+const avatarSeatYOffsets = [...DEFAULT_SCENE_TUNING.seatAvatarYOffset];
 const DEFAULT_BURN_PANEL_OPACITY = 0.55;
 let burnPanelOpacity = DEFAULT_BURN_PANEL_OPACITY;
 const DEFAULT_TABLE_HUD_SETTINGS = {
@@ -666,24 +689,14 @@ function getStoredPlayerName() {
   return raw.slice(0, 24);
 }
 
-function loadStoredViewSettings() {
-  try {
-    const raw = localStorage.getItem(VIEW_STORAGE_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return;
-    for (const key of Object.keys(DEFAULT_VIEW_SETTINGS)) {
-      if (Number.isFinite(Number(parsed[key]))) {
-        viewSettings[key] = Number(parsed[key]);
-      }
-    }
-  } catch {
-    // ignore invalid stored view payload
-  }
+function applyDefaultViewSettings() {
+  Object.assign(viewSettings, DEFAULT_VIEW_SETTINGS);
+  sanitizeViewSettings();
 }
 
-function persistViewSettings() {
-  localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify({
+function buildViewSettingsPayload() {
+  return {
+    version: VIEW_SETTINGS_VERSION,
     distance: Number(viewSettings.distance),
     height: Number(viewSettings.height),
     forward: Number(viewSettings.forward),
@@ -698,27 +711,64 @@ function persistViewSettings() {
     handDominoRotDeg: Number(viewSettings.handDominoRotDeg),
     tableDominoScale: Number(viewSettings.tableDominoScale),
     tableDominoTiltDeg: Number(viewSettings.tableDominoTiltDeg)
-  }));
+  };
 }
 
-function loadStoredSceneTuning() {
+function loadStoredViewSettings() {
+  applyDefaultViewSettings();
   try {
-    const raw = localStorage.getItem(SCENE_TUNING_STORAGE_KEY);
-    if (!raw) return;
+    const raw = localStorage.getItem(VIEW_STORAGE_KEY);
+    if (!raw) {
+      persistViewSettings();
+      return;
+    }
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return;
-    for (const key of Object.keys(DEFAULT_SCENE_TUNING)) {
+    if (!parsed || typeof parsed !== 'object') {
+      persistViewSettings();
+      return;
+    }
+
+    let hasAnySavedValue = false;
+    for (const key of Object.keys(DEFAULT_VIEW_SETTINGS)) {
       if (Number.isFinite(Number(parsed[key]))) {
-        sceneTuning[key] = Number(parsed[key]);
+        viewSettings[key] = Number(parsed[key]);
+        hasAnySavedValue = true;
       }
     }
+    if (!hasAnySavedValue) {
+      applyDefaultViewSettings();
+    }
+    sanitizeViewSettings();
+
+    const storedVersion = Number(parsed.version || 1);
+    if (!Number.isFinite(storedVersion) || storedVersion < VIEW_SETTINGS_VERSION) {
+      persistViewSettings();
+    }
   } catch {
-    // ignore invalid scene tuning payload
+    applyDefaultViewSettings();
+    persistViewSettings();
   }
 }
 
-function persistSceneTuning() {
-  localStorage.setItem(SCENE_TUNING_STORAGE_KEY, JSON.stringify({
+function persistViewSettings() {
+  sanitizeViewSettings();
+  localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(buildViewSettingsPayload()));
+}
+
+function applyDefaultSceneTuningSettings() {
+  for (const key of SCENE_TUNING_NUMERIC_KEYS) {
+    sceneTuning[key] = Number(DEFAULT_SCENE_TUNING[key]);
+  }
+  for (let i = 0; i < 4; i += 1) {
+    avatarSeatYOffsets[i] = Number(DEFAULT_SCENE_TUNING.seatAvatarYOffset?.[i] ?? 0);
+  }
+  sanitizeSceneTuning();
+  sanitizeAvatarSeatOffsets();
+}
+
+function buildSceneTuningPayload() {
+  return {
+    version: SCENE_TUNING_VERSION,
     tableScale: Number(sceneTuning.tableScale),
     chairScale: Number(sceneTuning.chairScale),
     avatarScale: Number(sceneTuning.avatarScale),
@@ -726,8 +776,101 @@ function persistSceneTuning() {
     avatarBack: Number(sceneTuning.avatarBack),
     avatarY: Number(sceneTuning.avatarY),
     chairY: Number(sceneTuning.chairY),
-    tableY: Number(sceneTuning.tableY)
-  }));
+    tableY: Number(sceneTuning.tableY),
+    seatAvatarYOffset: avatarSeatYOffsets.map((value) => Number(value))
+  };
+}
+
+function loadStoredSceneTuning() {
+  applyDefaultSceneTuningSettings();
+  try {
+    const raw = localStorage.getItem(SCENE_TUNING_STORAGE_KEY);
+    if (!raw) {
+      try {
+        const legacyRaw = localStorage.getItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
+        if (legacyRaw) {
+          const legacyParsed = JSON.parse(legacyRaw);
+          if (Array.isArray(legacyParsed)) {
+            for (let i = 0; i < 4; i += 1) {
+              avatarSeatYOffsets[i] = Number(legacyParsed[i] ?? avatarSeatYOffsets[i]);
+            }
+            sanitizeAvatarSeatOffsets();
+          }
+        }
+      } catch {
+        // ignore legacy payload parse failures
+      }
+      persistSceneTuning();
+      localStorage.removeItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      persistSceneTuning();
+      localStorage.removeItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
+      return;
+    }
+
+    let hasAnyNumeric = false;
+    for (const key of SCENE_TUNING_NUMERIC_KEYS) {
+      if (Number.isFinite(Number(parsed[key]))) {
+        sceneTuning[key] = Number(parsed[key]);
+        hasAnyNumeric = true;
+      }
+    }
+    if (!hasAnyNumeric) {
+      for (const key of SCENE_TUNING_NUMERIC_KEYS) {
+        sceneTuning[key] = Number(DEFAULT_SCENE_TUNING[key]);
+      }
+    }
+
+    let offsetLoaded = false;
+    if (Array.isArray(parsed.seatAvatarYOffset)) {
+      for (let i = 0; i < 4; i += 1) {
+        avatarSeatYOffsets[i] = Number(parsed.seatAvatarYOffset[i] ?? avatarSeatYOffsets[i]);
+      }
+      offsetLoaded = true;
+    }
+    if (!offsetLoaded) {
+      try {
+        const legacyRaw = localStorage.getItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
+        if (legacyRaw) {
+          const legacyParsed = JSON.parse(legacyRaw);
+          if (Array.isArray(legacyParsed)) {
+            for (let i = 0; i < 4; i += 1) {
+              avatarSeatYOffsets[i] = Number(legacyParsed[i] ?? avatarSeatYOffsets[i]);
+            }
+            offsetLoaded = true;
+          }
+        }
+      } catch {
+        // ignore legacy payload parse failures
+      }
+    }
+    if (!offsetLoaded) {
+      for (let i = 0; i < 4; i += 1) {
+        avatarSeatYOffsets[i] = Number(DEFAULT_SCENE_TUNING.seatAvatarYOffset?.[i] ?? avatarSeatYOffsets[i]);
+      }
+    }
+
+    sanitizeSceneTuning();
+    sanitizeAvatarSeatOffsets();
+    const storedVersion = Number(parsed.version || 1);
+    if (!Number.isFinite(storedVersion) || storedVersion < SCENE_TUNING_VERSION || !Array.isArray(parsed.seatAvatarYOffset)) {
+      persistSceneTuning();
+    }
+    localStorage.removeItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
+  } catch {
+    applyDefaultSceneTuningSettings();
+    persistSceneTuning();
+    localStorage.removeItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
+  }
+}
+
+function persistSceneTuning() {
+  sanitizeSceneTuning();
+  sanitizeAvatarSeatOffsets();
+  localStorage.setItem(SCENE_TUNING_STORAGE_KEY, JSON.stringify(buildSceneTuningPayload()));
 }
 
 function sanitizeAvatarSeatOffsets() {
@@ -737,29 +880,13 @@ function sanitizeAvatarSeatOffsets() {
 }
 
 function loadStoredAvatarSeatOffsets() {
-  try {
-    const raw = localStorage.getItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
-    if (!raw) {
-      sanitizeAvatarSeatOffsets();
-      return;
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      sanitizeAvatarSeatOffsets();
-      return;
-    }
-    for (let i = 0; i < 4; i += 1) {
-      avatarSeatYOffsets[i] = Number(parsed[i] ?? avatarSeatYOffsets[i]);
-    }
-  } catch {
-    // ignore invalid payload
-  }
+  // Legacy no-op: seat offsets are now persisted within SCENE_TUNING_STORAGE_KEY.
   sanitizeAvatarSeatOffsets();
 }
 
 function persistAvatarSeatOffsets() {
   sanitizeAvatarSeatOffsets();
-  localStorage.setItem(AVATAR_Y_OFFSETS_STORAGE_KEY, JSON.stringify(avatarSeatYOffsets));
+  persistSceneTuning();
 }
 
 function loadStoredChairVisibility() {
@@ -3246,7 +3373,7 @@ function resetViewForLocalSeat(immediate = true) {
 }
 
 function resetViewSettingsToDefault() {
-  Object.assign(viewSettings, DEFAULT_VIEW_SETTINGS);
+  applyDefaultViewSettings();
   persistViewSettings();
   updateViewControlsUi();
   safeApplyViewSettings(true);
@@ -4386,15 +4513,10 @@ function setupSceneTuningControls() {
   }
 
   resetSceneTuningBtn?.addEventListener('click', () => {
-    localStorage.removeItem(SCENE_TUNING_STORAGE_KEY);
-    localStorage.removeItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
-    Object.assign(sceneTuning, DEFAULT_SCENE_TUNING);
-    for (let i = 0; i < avatarSeatYOffsets.length; i += 1) {
-      avatarSeatYOffsets[i] = 0;
-    }
+    applyDefaultSceneTuningSettings();
     updateSceneTuningUi();
     persistSceneTuning();
-    persistAvatarSeatOffsets();
+    localStorage.removeItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
     applySceneTuning({ rerenderHand: true });
     logMessage('Scene tuning reset.');
   });
@@ -5228,7 +5350,6 @@ function ensureButtons() {
   });
 
   resetViewBtn.addEventListener('click', () => {
-    localStorage.removeItem(VIEW_STORAGE_KEY);
     resetViewSettingsToDefault();
   });
 
@@ -5667,17 +5788,16 @@ window.addEventListener('resize', onResize);
 runBootStep('ensureButtons', ensureButtons);
 runBootStep('connect', connect);
 
-runBootStep('loadStoredViewSettings', loadStoredViewSettings);
 runBootStep('loadStoredSceneTuning', loadStoredSceneTuning);
-runBootStep('loadStoredAvatarSeatOffsets', loadStoredAvatarSeatOffsets);
+runBootStep('loadStoredViewSettings', loadStoredViewSettings);
 runBootStep('loadStoredChairVisibility', loadStoredChairVisibility);
 runBootStep('loadStoredBurnPanelOpacity', loadStoredBurnPanelOpacity);
 runBootStep('loadStoredTableHudSettings', loadStoredTableHudSettings);
 runBootStep('loadStoredBettingModalSettings', loadStoredBettingModalSettings);
 runBootStep('loadStoredMuteSetting', loadStoredMuteSetting);
 runBootStep('initAudioManager', initAudioManager);
-runBootStep('updateViewControlsUi', updateViewControlsUi);
 runBootStep('updateSceneTuningUi', updateSceneTuningUi);
+runBootStep('updateViewControlsUi', updateViewControlsUi);
 runBootStep('applyTableHudSettings', applyTableHudSettings);
 runBootStep('applyBettingModalSettings', applyBettingModalSettings);
 runBootStep('setupViewControls', setupViewControls);
