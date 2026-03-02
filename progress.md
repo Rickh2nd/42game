@@ -505,3 +505,25 @@ Skill-loop note:
   - failed texture/HDR loads are no longer cached forever (failed cache entries are evicted),
   - empty environment file catalog responses are no longer cached forever (evicted for retry),
   - `applyEnvironment` now retries same env when last load state is not `ok` (prevents sticky fallback).
+
+Update (avatar under-floor fix pass):
+- Added a single world floor reference constant: `FLOOR_Y = 0`.
+- Scene hierarchy normalized:
+  - added `seatsRoot` under `tableRoot`,
+  - moved `chairsRoot` under `seatsRoot`,
+  - moved all `avatarSeatGroups` under `seatsRoot` (avatars no longer parented directly under table root).
+- Environment room shell now sits at `FLOOR_Y` (removed `-0.02` room shift).
+- Table metrics now keep `floorY` pinned to `FLOOR_Y` instead of table mesh minY.
+- Scene tuning now sets `tableRoot.position.y = FLOOR_Y + sceneTuning.tableY`; table model stays at local `y=0`.
+- Seat/avatar placement revised:
+  - chair seat groups keep `y=0` (XZ placement only),
+  - chair visual offset applied to child model `position.y = sceneTuning.chairY`,
+  - avatar base Y computed from chair seat height above floor + avatar offsets,
+  - removed tabletop-based avatar Y cap logic from base placement.
+- Added hard world-space clamp to prevent under-floor avatars:
+  - if avatar world Y `< FLOOR_Y + 0.05`, push up by delta,
+  - logs once per seat: `[avatar] clamped above floor seat=<i> worldY=<...>`.
+
+Validation:
+- `node --check client/main.js` pass.
+- Defaults remain unchanged for VIEW + SCENE tuning constants.

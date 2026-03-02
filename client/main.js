@@ -27,6 +27,7 @@ const PHASES = {
   HAND_OVER: 'handOver'
 };
 
+const FLOOR_Y = 0;
 const PLAY_PLANE_Y = 0.6;
 const DOMINO_LONG = 0.056;
 const DOMINO_SHORT = 0.029;
@@ -270,9 +271,13 @@ const tableRoot = new THREE.Group();
 tableRoot.name = 'tableRoot';
 visualsGroup.add(tableRoot);
 
+const seatsRoot = new THREE.Group();
+seatsRoot.name = 'seatsRoot';
+tableRoot.add(seatsRoot);
+
 const chairsRoot = new THREE.Group();
 chairsRoot.name = 'chairsRoot';
-tableRoot.add(chairsRoot);
+seatsRoot.add(chairsRoot);
 
 const themeGroup = new THREE.Group();
 themeGroup.name = 'themeGroup';
@@ -307,7 +312,7 @@ const chairSeatGroups = [0, 1, 2, 3].map(() => {
 
 const avatarSeatGroups = [0, 1, 2, 3].map(() => {
   const g = new THREE.Group();
-  tableRoot.add(g);
+  seatsRoot.add(g);
   return g;
 });
 
@@ -379,7 +384,7 @@ const environmentTemplates = {
 };
 const tableMetrics = {
   topY: PLAY_PLANE_Y,
-  floorY: 0,
+  floorY: FLOOR_Y,
   radius: 2.9
 };
 const seatRuntime = [0, 1, 2, 3].map(() => ({
@@ -1555,7 +1560,7 @@ function updateTableMetricsFromObject(object3d) {
   tmpBox.setFromObject(object3d);
   if (!Number.isFinite(tmpBox.max.y) || !Number.isFinite(tmpBox.min.y)) return;
   tableMetrics.topY = tmpBox.max.y;
-  tableMetrics.floorY = tmpBox.min.y;
+  tableMetrics.floorY = FLOOR_Y;
   const sizeX = Math.max(0.1, tmpBox.max.x - tmpBox.min.x);
   const sizeZ = Math.max(0.1, tmpBox.max.z - tmpBox.min.z);
   tableMetrics.radius = Math.max(1.8, Math.min(sizeX, sizeZ) * 0.48);
@@ -1570,14 +1575,26 @@ function projectWorldToScreen(world, out = { x: 0, y: 0 }) {
 }
 
 function clampAvatarBaseY(baseY, seatIndex) {
-  const floorLimit = tableMetrics.floorY + 0.02;
-  const tableLimit = tableMetrics.topY - 0.1;
-  let out = Math.max(baseY, floorLimit);
-  if (out > tableLimit) {
-    warnOnce(`avatarTableClamp:${seatIndex}`, `Avatar seat ${seatIndex} clamped below table surface.`);
-    out = tableLimit;
+  const localFloorLimit = (FLOOR_Y - Number(tableRoot.position.y || 0)) + 0.02;
+  const out = Math.max(baseY, localFloorLimit);
+  if (out !== baseY) {
+    warnOnce(`avatarLocalFloorClamp:${seatIndex}`, `[avatar] local floor clamp seat=${seatIndex} baseY=${Number(baseY).toFixed(3)}`);
   }
   return out;
+}
+
+function enforceAvatarWorldFloorClamp(seatIndex, avatarGroup) {
+  if (!avatarGroup) return;
+  avatarGroup.updateWorldMatrix(true, false);
+  tmpV3B.setFromMatrixPosition(avatarGroup.matrixWorld);
+  const minWorldY = FLOOR_Y + 0.05;
+  if (tmpV3B.y >= minWorldY) return;
+  const delta = minWorldY - tmpV3B.y;
+  avatarGroup.position.y += delta;
+  warnOnce(
+    `avatarWorldFloorClamp:${seatIndex}`,
+    `[avatar] clamped above floor seat=${seatIndex} worldY=${tmpV3B.y.toFixed(3)}`
+  );
 }
 
 function beginNameplateDrag(seatIndex, pointerId, clientX, clientY) {
@@ -3054,7 +3071,7 @@ function setChairModelForSeat(seatIndex, chairTemplate) {
   }
 
   group.add(clone);
-  seatRuntime[seatIndex].chairSeatY = Math.min(findSeatAnchorY(clone), tableMetrics.topY - 0.28);
+  seatRuntime[seatIndex].chairSeatY = Math.max(0, Number(findSeatAnchorY(clone) || 0.42));
 }
 
 async function loadEnvironmentModels() {
@@ -3157,32 +3174,27 @@ function updateSeatTransforms() {
     chairGroup.scale.setScalar(sceneTuning.chairScale);
     chairGroup.position.set(
       seatDir.x * sceneTuning.seatRadius,
-      seatConfig.chair.pos[1] + sceneTuning.chairY,
+      0,
       seatDir.z * sceneTuning.seatRadius
     );
+    for (const child of chairGroup.children) {
+      child.position.y = sceneTuning.chairY;
+    }
     chairGroup.rotation.y = seatConfig.chair.rotY;
 
     const avatarGroup = avatarSeatGroups[seatIndex];
     avatarGroup.scale.setScalar(sceneTuning.avatarScale);
     const avatarRadius = Math.max(0.4, sceneTuning.seatRadius - 0.18 + sceneTuning.avatarBack);
     const perSeatYOffset = Number(avatarSeatYOffsets?.[seatIndex] || 0);
-    let avatarBaseY = (
-      seatConfig.avatar.pos[1]
-      + sceneTuning.chairY
-      + (seatRuntime[seatIndex].chairSeatY * sceneTuning.chairScale)
-      + 0.02
-      + sceneTuning.avatarY
+    const baseSeatHeightAboveFloor = Math.max(
+      0,
+      (Number(seatRuntime[seatIndex].chairSeatY || 0.42) * sceneTuning.chairScale) + sceneTuning.chairY + 0.02
     );
-    avatarBaseY = Math.min(avatarBaseY, tableMetrics.topY - 0.28);
+    let avatarBaseY = baseSeatHeightAboveFloor + sceneTuning.avatarY + perSeatYOffset;
     avatarBaseY = clampAvatarBaseY(avatarBaseY, seatIndex);
-    avatarBaseY += perSeatYOffset;
     avatarGroup.position.set(seatDir.x * avatarRadius, avatarBaseY, seatDir.z * avatarRadius);
-    if (perSeatYOffset === 0 && avatarBaseY >= tableMetrics.topY - 0.11) {
-      avatarGroup.position.x *= 1.18;
-      avatarGroup.position.z *= 1.18;
-      avatarGroup.position.y = tableMetrics.topY - 0.18;
-    }
     avatarGroup.rotation.y = seatConfig.avatar.rotY;
+    enforceAvatarWorldFloorClamp(seatIndex, avatarGroup);
   }
 
   updateNameplatePositions();
@@ -3282,11 +3294,13 @@ function applySceneTuning({ rerenderHand = true } = {}) {
   sanitizeSceneTuning();
   sanitizeAvatarSeatOffsets();
   chairsRoot.visible = !!chairsVisible;
+  tableRoot.position.y = FLOOR_Y + sceneTuning.tableY;
 
   const tableNode = environmentGroup.getObjectByName('tableModel');
   if (tableNode) {
     tableNode.scale.set(sceneTuning.tableScale, sceneTuning.tableScale, sceneTuning.tableScale);
-    tableNode.position.y = sceneTuning.tableY;
+    tableNode.position.y = 0;
+    tableRoot.updateMatrixWorld(true);
     updateTableMetricsFromObject(tableNode);
   }
 
@@ -3951,7 +3965,7 @@ function addCasinoTrim(roomRoot, roomWidth, roomDepth, wallHeight, material) {
 async function buildRoomEnvironment(entry, token, environmentId) {
   const roomRoot = new THREE.Group();
   roomRoot.name = `${environmentId || 'room'}Root`;
-  roomRoot.position.set(0, -0.02, 0);
+  roomRoot.position.set(0, FLOOR_Y, 0);
 
   const roomWidth = 18;
   const roomDepth = 20;
