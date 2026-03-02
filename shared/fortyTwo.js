@@ -10,6 +10,7 @@ export const MODES = {
 export const PHASES = {
   LOBBY: 'lobby',
   BIDDING: 'bidding',
+  BETTING: 'betting',
   CHOOSE_MODE: 'chooseMode',
   CHOOSE_TRUMP: 'chooseTrump',
   PLAYING: 'playing',
@@ -406,12 +407,14 @@ export function updateRoundWinsAndMarks(roundWins, gameMarks, winnerTeam, config
     teamA: Number(gameMarks?.teamA || 0),
     teamB: Number(gameMarks?.teamB || 0)
   };
+  let markAwardedTeam = null;
 
   nextRoundWins[winnerTeam] += 1;
 
   const target = Number(config.roundsPerMark || CONFIG_DEFAULTS.roundsPerMark);
   if (nextRoundWins[winnerTeam] >= target) {
     nextGameMarks[winnerTeam] += 1;
+    markAwardedTeam = winnerTeam;
     nextRoundWins.teamA = 0;
     nextRoundWins.teamB = 0;
   }
@@ -419,7 +422,8 @@ export function updateRoundWinsAndMarks(roundWins, gameMarks, winnerTeam, config
   return {
     roundWins: nextRoundWins,
     gameMarks: nextGameMarks,
-    champsTeam: computeChampsTeam(nextGameMarks)
+    champsTeam: computeChampsTeam(nextGameMarks),
+    markAwardedTeam
   };
 }
 

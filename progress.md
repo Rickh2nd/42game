@@ -249,3 +249,66 @@ Validation:
 - `node --check server/server.js` pass
 - `node --check shared/fortyTwo.js` pass
 - local smoke: `/health` OK, `/socket.io` polling handshake OK.
+
+Update (stability + rules + UI + sound + betting + environment pass):
+- Added server-authoritative betting flow in `/server/server.js`:
+  - New host actions: `host:bettingEnable`, `host:setBetAmount`.
+  - New player action: `betting:respond` (`called` / `folded`) gated to controllable seat.
+  - CPU support during betting phase: pending CPU seats auto respond with level-weighted call/fold and bankroll checks.
+  - Betting lifecycle integrated with phase machine:
+    - `enterPlayingPhase` -> `PHASES.BETTING` (if enabled) -> `beginPlayingTricks`.
+    - Timeout auto-fold for unresolved betting seats remains via round close timer.
+  - Snapshot already includes betting state (`bettingEnabled`, `baseBetAmount`, `sessionBankroll`, `pendingBets`).
+
+- Added Human/CPU transform stability protections in `/client/main.js`:
+  - Removed automatic `claimForSelf` on seat type toggle.
+  - Added seat-type regression guard with before/after transform capture and restore.
+  - Guard logs before/after values (tableRoot/environmentRoot/chairs/seat/avatar slot transforms).
+  - Avoids lobby view reset on local seat changes (`resetViewForLocalSeat` now skipped in lobby).
+  - Avatar rerendering now only occurs when avatar ids actually change (prevents unnecessary model reload/shift on metadata changes).
+
+- Added draggable + scalable center BID/TRUMP HUD:
+  - New drag handle `#tableHudDragHandle`.
+  - New slider `#table_hud_scale` (0.50..3.50).
+  - Persisted in localStorage (`texas42_table_hud_v1`) with offsetX/offsetY/scale.
+  - CSS transform now applies translate+scale via CSS vars.
+
+- Nameplate / crown updates:
+  - Nameplate content order now strictly: TEAM, NAME, BID.
+  - Crown now uses `roomState.lastSevenMarksWinnerTeam` only (not lifetime gameMarks).
+
+- Betting UI added:
+  - New right-panel section `BETTING` (host toggle + base bet + bankroll totals).
+  - New centered betting modal (`#bettingModal`) during `PHASES.BETTING`:
+    - active local seat gets CALL/FOLD buttons
+    - others see waiting/status text.
+
+- Sound system added in `/client/main.js`:
+  - WebAudio-based `playDominoThud()` on `game:dominoPlayed`.
+  - `playPartyBlower()` when `lastSevenMarksWinnerTeam` changes.
+  - Mute toggle in menu (`#muteToggle`) persisted in localStorage (`texas42_mute_v1`).
+
+- Environment system cleaned for requested room set:
+  - `client/assets/environments/environments.json` now only lists:
+    - `casino_lounge`, `spooky_parlor`, `rustic_tavern`, `modern_suite`, `neon_arcade`.
+  - Client environment loader now builds room-shell for selected environment (floor + 3 walls + ceiling + trim) even with missing assets.
+  - Texture/HDR detection generalized via file catalog scan; casino prefers `anniversary_lounge_4k.hdr`.
+  - Carpet/floor selection supports casino `materials/carpet` first, then `materials/floor` fallback.
+  - Missing files now degrade gracefully with status text (`Environment fallback: ...`) and no crash.
+
+Validation (this pass):
+- Syntax:
+  - `node --check server/server.js` pass
+  - `node --check client/main.js` pass
+  - `node --check shared/fortyTwo.js` pass
+- Local smoke on `PORT=3011`:
+  - `GET /health` returns ok JSON
+  - `/socket.io` polling handshake returns Engine.IO payload
+  - socket client create room + `host:bettingEnable` updates snapshot (`bettingEnabled=true`, `baseBetAmount=15`)
+  - socket `debug:ping` ack pass
+  - CPU-only flow reaches phases including `betting` and `playing`.
+- Playwright skill client attempt still blocked here due missing dependency:
+  - `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright'` from `$WEB_GAME_CLIENT`.
+
+Remaining follow-up suggestion:
+- Do one manual visual pass in browser for final HUD drag ergonomics and betting modal sizing on mobile.

@@ -19,6 +19,7 @@ const MODES = {
 const PHASES = {
   LOBBY: 'lobby',
   BIDDING: 'bidding',
+  BETTING: 'betting',
   CHOOSE_MODE: 'chooseMode',
   CHOOSE_TRUMP: 'chooseTrump',
   PLAYING: 'playing',
@@ -41,6 +42,8 @@ const VIEW_STORAGE_KEY = 'texas42_view_settings_v1';
 const SCENE_TUNING_STORAGE_KEY = 'texas42_scene_tuning_v1';
 const CHAIRS_VISIBLE_STORAGE_KEY = 'texas42_chairs_visible_v1';
 const BURN_PANEL_OPACITY_STORAGE_KEY = 'texas42_burn_panel_opacity_v1';
+const TABLE_HUD_STORAGE_KEY = 'texas42_table_hud_v1';
+const MUTE_STORAGE_KEY = 'texas42_mute_v1';
 const PLAYER_ID_STORAGE_KEY = 'texas42_player_id';
 const CLIENT_VERSION = '1.0.0';
 
@@ -54,12 +57,21 @@ const roomStatus = document.getElementById('roomStatus');
 const eventLog = document.getElementById('eventLog');
 const socketStatusBadge = document.getElementById('socketStatusBadge');
 const seatControls = document.getElementById('seatControls');
+const tableHudDragHandle = document.getElementById('tableHudDragHandle');
 const hudBidValue = document.getElementById('hudBidValue');
 const hudTrumpValue = document.getElementById('hudTrumpValue');
 const turnTimerHud = document.getElementById('turnTimerHud');
 const timerEnabledToggle = document.getElementById('timerEnabledToggle');
 const timerPauseBtn = document.getElementById('timerPauseBtn');
 const timerStateText = document.getElementById('timerStateText');
+const tableHudScaleInput = document.getElementById('table_hud_scale');
+const tableHudScaleValue = document.getElementById('table_hud_scale_val');
+const muteToggle = document.getElementById('muteToggle');
+const bettingEnabledToggle = document.getElementById('bettingEnabledToggle');
+const betAmountInput = document.getElementById('bet_amount');
+const betAmountValue = document.getElementById('bet_amount_val');
+const bettingStateText = document.getElementById('bettingStateText');
+const bettingTotals = document.getElementById('bettingTotals');
 const resetViewBtn = document.getElementById('resetViewBtn');
 const copyViewBtn = document.getElementById('copyViewBtn');
 const resetSceneTuningBtn = document.getElementById('resetSceneTuningBtn');
@@ -95,6 +107,7 @@ const sectionTrump = document.getElementById('section-trump');
 const sectionMarks = document.getElementById('section-marks');
 const sectionView = document.getElementById('section-view');
 const sectionSceneTuning = document.getElementById('section-scene-tuning');
+const sectionBetting = document.getElementById('section-betting');
 const sectionDebugTable = document.getElementById('section-debug-table');
 
 const bidButtonsWrap = document.getElementById('bidButtons');
@@ -111,6 +124,11 @@ const actionModalTitle = document.getElementById('actionModalTitle');
 const actionModalBody = document.getElementById('actionModalBody');
 const actionModalButtons = document.getElementById('actionModalButtons');
 const actionModalModeButtons = document.getElementById('actionModalModeButtons');
+const bettingModal = document.getElementById('bettingModal');
+const bettingModalTitle = document.getElementById('bettingModalTitle');
+const bettingModalBody = document.getElementById('bettingModalBody');
+const bettingModalPot = document.getElementById('bettingModalPot');
+const bettingModalButtons = document.getElementById('bettingModalButtons');
 
 const scoreTeamAMain = document.getElementById('score-teamA-main');
 const scoreTeamBMain = document.getElementById('score-teamB-main');
@@ -403,6 +421,20 @@ const DEFAULT_SCENE_TUNING = {
 const sceneTuning = { ...DEFAULT_SCENE_TUNING };
 const DEFAULT_BURN_PANEL_OPACITY = 0.55;
 let burnPanelOpacity = DEFAULT_BURN_PANEL_OPACITY;
+const DEFAULT_TABLE_HUD_SETTINGS = {
+  offsetX: 0,
+  offsetY: 0,
+  scale: 1
+};
+const tableHudSettings = { ...DEFAULT_TABLE_HUD_SETTINGS };
+
+let muted = false;
+let audioCtx = null;
+let pendingSeatTypeTransformGuard = null;
+let draggingTableHud = false;
+let tableHudPointerId = null;
+let tableHudDragStart = { x: 0, y: 0 };
+let tableHudOffsetStart = { x: 0, y: 0 };
 
 let localClientId = null;
 let roomState = null;
@@ -700,6 +732,236 @@ function loadStoredBurnPanelOpacity() {
   applyBurnPanelOpacity(raw);
 }
 
+function sanitizeTableHudSettings() {
+  tableHudSettings.offsetX = clampValue(Number(tableHudSettings.offsetX), -800, 800, 0);
+  tableHudSettings.offsetY = clampValue(Number(tableHudSettings.offsetY), -600, 600, 0);
+  tableHudSettings.scale = clampValue(Number(tableHudSettings.scale), 0.5, 3.5, 1);
+}
+
+function applyTableHudSettings({ persist = false } = {}) {
+  sanitizeTableHudSettings();
+  document.documentElement.style.setProperty('--tableHudOffsetX', `${tableHudSettings.offsetX.toFixed(1)}px`);
+  document.documentElement.style.setProperty('--tableHudOffsetY', `${tableHudSettings.offsetY.toFixed(1)}px`);
+  document.documentElement.style.setProperty('--tableHudScale', `${tableHudSettings.scale.toFixed(2)}`);
+  if (tableHudScaleInput) {
+    tableHudScaleInput.value = tableHudSettings.scale.toFixed(2);
+  }
+  if (tableHudScaleValue) {
+    tableHudScaleValue.textContent = tableHudSettings.scale.toFixed(2);
+  }
+  if (persist) {
+    localStorage.setItem(TABLE_HUD_STORAGE_KEY, JSON.stringify({
+      offsetX: Number(tableHudSettings.offsetX),
+      offsetY: Number(tableHudSettings.offsetY),
+      scale: Number(tableHudSettings.scale)
+    }));
+  }
+}
+
+function loadStoredTableHudSettings() {
+  try {
+    const raw = localStorage.getItem(TABLE_HUD_STORAGE_KEY);
+    if (!raw) {
+      applyTableHudSettings();
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      tableHudSettings.offsetX = Number(parsed.offsetX ?? tableHudSettings.offsetX);
+      tableHudSettings.offsetY = Number(parsed.offsetY ?? tableHudSettings.offsetY);
+      tableHudSettings.scale = Number(parsed.scale ?? tableHudSettings.scale);
+    }
+  } catch {
+    // ignore invalid payload
+  }
+  applyTableHudSettings();
+}
+
+function setMuted(value, { persist = false } = {}) {
+  muted = !!value;
+  if (muteToggle) {
+    muteToggle.checked = muted;
+  }
+  if (persist) {
+    localStorage.setItem(MUTE_STORAGE_KEY, muted ? '1' : '0');
+  }
+}
+
+function loadStoredMuteSetting() {
+  const raw = localStorage.getItem(MUTE_STORAGE_KEY);
+  setMuted(raw === '1', { persist: false });
+}
+
+function ensureAudioContext() {
+  if (audioCtx) return audioCtx;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  audioCtx = new Ctx();
+  return audioCtx;
+}
+
+function playDominoThud() {
+  if (muted) return;
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
+  }
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  const filter = ctx.createBiquadFilter();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(120, now);
+  osc.frequency.exponentialRampToValueAtTime(52, now + 0.085);
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(720, now);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.17, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+  osc.connect(filter).connect(gain).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.17);
+}
+
+function playPartyBlower() {
+  if (muted) return;
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
+  }
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(360, now);
+  osc.frequency.exponentialRampToValueAtTime(880, now + 0.16);
+  osc.frequency.exponentialRampToValueAtTime(520, now + 0.45);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.11, now + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.52);
+}
+
+function captureSeatTypeTransformSnapshot() {
+  const tablePos = {
+    x: Number(tableRoot.position.x || 0),
+    y: Number(tableRoot.position.y || 0),
+    z: Number(tableRoot.position.z || 0)
+  };
+  const environmentPos = {
+    x: Number(environmentGroup.position.x || 0),
+    y: Number(environmentGroup.position.y || 0),
+    z: Number(environmentGroup.position.z || 0)
+  };
+  const seatPos = avatarSeatGroups.map((group) => ({
+    x: Number(group.position.x || 0),
+    y: Number(group.position.y || 0),
+    z: Number(group.position.z || 0)
+  }));
+  const chairPos = chairSeatGroups.map((group) => ({
+    x: Number(group.position.x || 0),
+    y: Number(group.position.y || 0),
+    z: Number(group.position.z || 0)
+  }));
+  const avatarSlotPos = avatarSeatGroups.map((group) => ({
+    x: Number(group.position.x || 0),
+    y: Number(group.position.y || 0),
+    z: Number(group.position.z || 0)
+  }));
+  return {
+    tablePos,
+    environmentPos,
+    seatPos,
+    chairPos,
+    avatarSlotPos
+  };
+}
+
+function restoreSeatTypeTransformSnapshot(snapshot) {
+  if (!snapshot) return;
+  tableRoot.position.set(
+    Number(snapshot.tablePos?.x || 0),
+    Number(snapshot.tablePos?.y || 0),
+    Number(snapshot.tablePos?.z || 0)
+  );
+  environmentGroup.position.set(
+    Number(snapshot.environmentPos?.x || 0),
+    Number(snapshot.environmentPos?.y || 0),
+    Number(snapshot.environmentPos?.z || 0)
+  );
+  for (let i = 0; i < avatarSeatGroups.length; i += 1) {
+    const g = avatarSeatGroups[i];
+    if (!g) continue;
+    if (snapshot.seatPos?.[i]) {
+      g.position.set(
+        Number(snapshot.seatPos[i].x || 0),
+        Number(snapshot.seatPos[i].y || 0),
+        Number(snapshot.seatPos[i].z || 0)
+      );
+    }
+  }
+  for (let i = 0; i < chairSeatGroups.length; i += 1) {
+    const g = chairSeatGroups[i];
+    if (!g || !snapshot.chairPos?.[i]) continue;
+    g.position.set(
+      Number(snapshot.chairPos[i].x || 0),
+      Number(snapshot.chairPos[i].y || 0),
+      Number(snapshot.chairPos[i].z || 0)
+    );
+  }
+}
+
+function enforceSeatTypeTransformGuard() {
+  if (!pendingSeatTypeTransformGuard) return;
+  const before = pendingSeatTypeTransformGuard.before;
+  const after = captureSeatTypeTransformSnapshot();
+  const drift = (a, b) => Math.abs(Number(a || 0) - Number(b || 0));
+  const vecDrift = (a, b) => drift(a?.x, b?.x) > 0.0005 || drift(a?.y, b?.y) > 0.0005 || drift(a?.z, b?.z) > 0.0005;
+  const changed = vecDrift(after.tablePos, before.tablePos)
+    || vecDrift(after.environmentPos, before.environmentPos)
+    || after.seatPos.some((value, index) => vecDrift(value, before.seatPos[index]))
+    || after.chairPos.some((value, index) => vecDrift(value, before.chairPos[index]))
+    || after.avatarSlotPos.some((value, index) => vecDrift(value, before.avatarSlotPos[index]));
+
+  if (changed) {
+    console.warn('[seat-type-guard] Transform drift detected on seat type toggle. Restoring.', {
+      tableBefore: before.tablePos,
+      tableAfter: after.tablePos,
+      envBefore: before.environmentPos,
+      envAfter: after.environmentPos,
+      seatBefore: before.seatPos,
+      seatAfter: after.seatPos,
+      chairBefore: before.chairPos,
+      chairAfter: after.chairPos,
+      avatarBefore: before.avatarSlotPos,
+      avatarAfter: after.avatarSlotPos
+    });
+    restoreSeatTypeTransformSnapshot(before);
+  } else {
+    console.log('[seat-type-guard] stable', {
+      before: {
+        table: before.tablePos,
+        env: before.environmentPos,
+        seats: before.seatPos,
+        chairs: before.chairPos,
+        avatarSlots: before.avatarSlotPos
+      },
+      after: {
+        table: after.tablePos,
+        env: after.environmentPos,
+        seats: after.seatPos,
+        chairs: after.chairPos,
+        avatarSlots: after.avatarSlotPos
+      }
+    });
+  }
+  pendingSeatTypeTransformGuard = null;
+}
+
 function formatTimerMs(ms) {
   const safe = Math.max(0, Number(ms) || 0);
   const total = Math.ceil(safe / 1000);
@@ -726,140 +988,50 @@ const ENV_THEME_PRESETS = {
     ambient: { sky: 0xf0e4d1, ground: 0x2f241c, intensity: 0.46 },
     fog: { color: '#211913', near: 26, far: 72 }
   },
+  spooky_parlor: {
+    top: '#372b42',
+    bottom: '#16111d',
+    key: { color: 0xc7a4ff, intensity: 1.0, pos: [3.8, 7.0, 4.6] },
+    fill: { color: 0x7a9ba6, intensity: 0.22, pos: [-5.2, 5.1, -4.1] },
+    rim: { color: 0x8a73d4, intensity: 0.2, pos: [0, 4.5, -7.4] },
+    ambient: { sky: 0xd0c2ef, ground: 0x1f1728, intensity: 0.42 },
+    fog: { color: '#181321', near: 18, far: 58 }
+  },
+  rustic_tavern: {
+    top: '#5a3d28',
+    bottom: '#1f1610',
+    key: { color: 0xffd29b, intensity: 1.12, pos: [4.1, 6.9, 4.6] },
+    fill: { color: 0xc5a17a, intensity: 0.27, pos: [-5.3, 5.2, -4.0] },
+    rim: { color: 0xe9ab72, intensity: 0.2, pos: [0, 4.4, -7.2] },
+    ambient: { sky: 0xf2dcc1, ground: 0x342417, intensity: 0.48 },
+    fog: { color: '#24180f', near: 18, far: 60 }
+  },
+  modern_suite: {
+    top: '#425767',
+    bottom: '#19222b',
+    key: { color: 0xe7edf5, intensity: 1.1, pos: [4.3, 7.5, 4.0] },
+    fill: { color: 0xa7c1d2, intensity: 0.32, pos: [-5.8, 5.6, -4.5] },
+    rim: { color: 0xc0d8eb, intensity: 0.16, pos: [0, 4.9, -7.5] },
+    ambient: { sky: 0xe5edf5, ground: 0x283947, intensity: 0.52 },
+    fog: { color: '#1d2832', near: 22, far: 70 }
+  },
+  neon_arcade: {
+    top: '#23314e',
+    bottom: '#111725',
+    key: { color: 0x9cc5ff, intensity: 1.0, pos: [4.9, 7.4, 4.1] },
+    fill: { color: 0x7df3d7, intensity: 0.24, pos: [-5.7, 5.5, -4.8] },
+    rim: { color: 0xff5eb9, intensity: 0.2, pos: [0, 4.6, -7.8] },
+    ambient: { sky: 0xccdbff, ground: 0x1f2940, intensity: 0.44 },
+    fog: { color: '#161d2c', near: 18, far: 62 }
+  },
   default_lounge: {
-    top: '#203546',
-    bottom: '#0c1218',
-    key: { color: 0xffe4ba, intensity: 1.2, pos: [4.2, 7.8, 4.0] },
-    fill: { color: 0x8aaed2, intensity: 0.36, pos: [-5.8, 6.1, -3.7] },
-    rim: { color: 0xf8c98c, intensity: 0.26, pos: [0, 4.8, -7.8] },
-    ambient: { sky: 0xffefd2, ground: 0x294357, intensity: 0.54 },
-    fog: { color: '#101720', near: 18, far: 62 }
-  },
-  witch_parlor: {
-    top: '#3a2a53',
-    bottom: '#141020',
-    key: { color: 0xcca3ff, intensity: 1.03, pos: [3.7, 7.0, 4.8] },
-    fill: { color: 0x6fbf8b, intensity: 0.24, pos: [-5.4, 4.7, -4.2] },
-    rim: { color: 0xa57dff, intensity: 0.28, pos: [0, 4.5, -7.5] },
-    ambient: { sky: 0xc9b3ff, ground: 0x1e1730, intensity: 0.46 },
-    fog: { color: '#1a1530', near: 16, far: 58 }
-  },
-  zombie_graveyard: {
-    top: '#1b2433',
-    bottom: '#0a0f17',
-    key: { color: 0x9cc5ff, intensity: 0.98, pos: [5.2, 8.7, 3.5] },
-    fill: { color: 0x7fb58b, intensity: 0.3, pos: [-5.3, 5.0, -5.8] },
-    rim: { color: 0x9de8a8, intensity: 0.22, pos: [0, 5.3, -8.2] },
-    ambient: { sky: 0xceddf7, ground: 0x1b2836, intensity: 0.46 },
-    fog: { color: '#0f1620', near: 14, far: 50 }
-  },
-  pirate_cove: {
-    top: '#1f3340',
-    bottom: '#0d131a',
-    key: { color: 0xf7cf97, intensity: 1.15, pos: [4.8, 7.5, 3.9] },
-    fill: { color: 0x7ea8d7, intensity: 0.32, pos: [-6.2, 5.6, -5.8] },
-    rim: { color: 0xf0b26f, intensity: 0.25, pos: [0, 4.9, -8.6] },
-    ambient: { sky: 0xf3dbb2, ground: 0x203446, intensity: 0.5 },
-    fog: { color: '#0f171f', near: 15, far: 55 }
-  },
-  cowboy_saloon: {
-    top: '#4a2f20',
-    bottom: '#1b120c',
-    key: { color: 0xffd295, intensity: 1.22, pos: [4.3, 6.8, 4.6] },
-    fill: { color: 0xc39f7b, intensity: 0.28, pos: [-4.8, 5.6, -4.2] },
-    rim: { color: 0xf8b870, intensity: 0.23, pos: [0, 4.7, -7.2] },
-    ambient: { sky: 0xf5d5a7, ground: 0x3f291e, intensity: 0.5 },
-    fog: { color: '#21170f', near: 18, far: 64 }
-  },
-  ninja_dojo: {
-    top: '#272e38',
-    bottom: '#11161d',
-    key: { color: 0xf5dfb9, intensity: 1.08, pos: [3.8, 7.4, 4.2] },
-    fill: { color: 0x91a7b8, intensity: 0.3, pos: [-5.8, 5.2, -4.6] },
-    rim: { color: 0xd8bd8a, intensity: 0.2, pos: [0, 4.4, -7.0] },
-    ambient: { sky: 0xe8dfcb, ground: 0x252b34, intensity: 0.5 },
-    fog: { color: '#181e26', near: 20, far: 65 }
-  },
-  knight_castle: {
-    top: '#4f5562',
-    bottom: '#1c2028',
-    key: { color: 0xf8e0ba, intensity: 1.08, pos: [4.5, 7.9, 4.0] },
-    fill: { color: 0x90a2be, intensity: 0.31, pos: [-5.6, 5.3, -4.5] },
-    rim: { color: 0xe2ba82, intensity: 0.22, pos: [0, 4.8, -7.8] },
-    ambient: { sky: 0xe0e6ef, ground: 0x2a313d, intensity: 0.5 },
-    fog: { color: '#1d232d', near: 18, far: 62 }
-  },
-  goblin_cave: {
-    top: '#243329',
-    bottom: '#0f1612',
-    key: { color: 0x8ee1a2, intensity: 1.02, pos: [4.7, 7.2, 4.4] },
-    fill: { color: 0x5fa36f, intensity: 0.28, pos: [-6.0, 5.7, -4.8] },
-    rim: { color: 0x79cc8b, intensity: 0.24, pos: [0, 4.8, -8.2] },
-    ambient: { sky: 0xcde7d3, ground: 0x1e2d23, intensity: 0.47 },
-    fog: { color: '#131f17', near: 15, far: 52 }
-  },
-  elf_forest: {
-    top: '#2d4537',
-    bottom: '#101913',
-    key: { color: 0xbce9bf, intensity: 1.05, pos: [4.3, 7.6, 3.8] },
-    fill: { color: 0x82b29a, intensity: 0.29, pos: [-5.3, 5.3, -5.0] },
-    rim: { color: 0xa6eab0, intensity: 0.2, pos: [0, 4.8, -7.8] },
-    ambient: { sky: 0xd8f0d8, ground: 0x1d2a20, intensity: 0.5 },
-    fog: { color: '#142016', near: 15, far: 54 }
-  },
-  wizard_tower: {
-    top: '#2a385f',
-    bottom: '#11182a',
-    key: { color: 0xa6c8ff, intensity: 1.08, pos: [4.6, 7.9, 3.6] },
-    fill: { color: 0x6f98ff, intensity: 0.28, pos: [-5.8, 5.4, -4.8] },
-    rim: { color: 0x8bb2ff, intensity: 0.26, pos: [0, 4.8, -8.4] },
-    ambient: { sky: 0xc8d8fa, ground: 0x1f2943, intensity: 0.48 },
-    fog: { color: '#151d2f', near: 18, far: 58 }
-  },
-  hospital_clinic: {
-    top: '#3a596f',
-    bottom: '#182733',
-    key: { color: 0xe9f8ff, intensity: 1.1, pos: [3.9, 7.5, 4.3] },
-    fill: { color: 0xa6cbde, intensity: 0.37, pos: [-5.5, 5.8, -4.0] },
-    rim: { color: 0x9dd7ff, intensity: 0.17, pos: [0, 4.8, -7.0] },
-    ambient: { sky: 0xe8f7ff, ground: 0x29495b, intensity: 0.56 },
-    fog: { color: '#1d3040', near: 24, far: 72 }
-  },
-  battlefield: {
-    top: '#524d47',
-    bottom: '#1a1918',
-    key: { color: 0xf8d8bf, intensity: 1.08, pos: [4.8, 7.4, 4.8] },
-    fill: { color: 0xb5a695, intensity: 0.3, pos: [-6.2, 5.8, -4.2] },
-    rim: { color: 0xe09d84, intensity: 0.24, pos: [0, 4.9, -7.5] },
-    ambient: { sky: 0xefe1d5, ground: 0x3b352f, intensity: 0.48 },
-    fog: { color: '#252220', near: 16, far: 56 }
-  },
-  kitchen: {
-    top: '#4a3b2a',
-    bottom: '#1d1711',
-    key: { color: 0xffdda8, intensity: 1.2, pos: [4.1, 7.1, 4.4] },
-    fill: { color: 0xc6ad8a, intensity: 0.3, pos: [-5.3, 5.4, -3.8] },
-    rim: { color: 0xffc184, intensity: 0.2, pos: [0, 4.4, -7.0] },
-    ambient: { sky: 0xf6e4c9, ground: 0x382a1e, intensity: 0.5 },
-    fog: { color: '#20170f', near: 20, far: 64 }
-  },
-  modern_office: {
-    top: '#405265',
-    bottom: '#18222b',
-    key: { color: 0xdde8f7, intensity: 1.13, pos: [4.4, 7.7, 4.2] },
-    fill: { color: 0xa6bed5, intensity: 0.34, pos: [-6.0, 5.8, -4.4] },
-    rim: { color: 0xb6d1ea, intensity: 0.18, pos: [0, 4.8, -7.4] },
-    ambient: { sky: 0xdce9f5, ground: 0x2a3a48, intensity: 0.54 },
-    fog: { color: '#1b2832', near: 24, far: 75 }
-  },
-  viking_longhouse: {
-    top: '#4f3b2a',
-    bottom: '#1a120d',
-    key: { color: 0xffc589, intensity: 1.2, pos: [4.2, 6.9, 4.7] },
-    fill: { color: 0xc49b73, intensity: 0.27, pos: [-5.5, 5.2, -3.9] },
-    rim: { color: 0xf0a86c, intensity: 0.24, pos: [0, 4.4, -7.6] },
-    ambient: { sky: 0xf1ddc1, ground: 0x35251a, intensity: 0.48 },
-    fog: { color: '#1f150f', near: 18, far: 58 }
+    top: '#5c4536',
+    bottom: '#1d1612',
+    key: { color: 0xffd7a1, intensity: 1.08, pos: [4.2, 7.1, 4.3] },
+    fill: { color: 0x8ea9c8, intensity: 0.24, pos: [-5.7, 5.4, -4.1] },
+    rim: { color: 0xf3be86, intensity: 0.18, pos: [0, 4.4, -7.2] },
+    ambient: { sky: 0xf0e4d1, ground: 0x2f241c, intensity: 0.46 },
+    fog: { color: '#211913', near: 26, far: 72 }
   }
 };
 
@@ -1095,6 +1267,33 @@ function endNameplateDrag() {
   draggingPointerId = null;
 }
 
+function beginTableHudDrag(pointerId, clientX, clientY) {
+  draggingTableHud = true;
+  tableHudPointerId = pointerId;
+  tableHudDragStart = { x: clientX, y: clientY };
+  tableHudOffsetStart = {
+    x: Number(tableHudSettings.offsetX || 0),
+    y: Number(tableHudSettings.offsetY || 0)
+  };
+  tableHudDragHandle?.classList.add('dragging');
+}
+
+function updateTableHudDrag(clientX, clientY) {
+  if (!draggingTableHud) return;
+  const dx = clientX - tableHudDragStart.x;
+  const dy = clientY - tableHudDragStart.y;
+  tableHudSettings.offsetX = tableHudOffsetStart.x + dx;
+  tableHudSettings.offsetY = tableHudOffsetStart.y + dy;
+  applyTableHudSettings({ persist: true });
+}
+
+function endTableHudDrag() {
+  if (!draggingTableHud) return;
+  draggingTableHud = false;
+  tableHudPointerId = null;
+  tableHudDragHandle?.classList.remove('dragging');
+}
+
 function refreshLocalHandScreenBounds() {
   localHandScreenBounds.valid = false;
   let minX = Infinity;
@@ -1272,7 +1471,7 @@ function updatePanelAutoBehavior() {
     setPanelOpen(false);
   }
   if (
-    [PHASES.BIDDING, PHASES.CHOOSE_MODE, PHASES.CHOOSE_TRUMP].includes(roomState.phase)
+    [PHASES.BIDDING, PHASES.BETTING, PHASES.CHOOSE_MODE, PHASES.CHOOSE_TRUMP].includes(roomState.phase)
     && lastPhase !== roomState.phase
   ) {
     setPanelOpen(false);
@@ -1287,6 +1486,7 @@ function showSections() {
     room: false,
     players: false,
     game: false,
+    betting: false,
     view: false,
     sceneTuning: false,
     debugTable: false,
@@ -1300,24 +1500,35 @@ function showSections() {
   } else if (roomState.phase === PHASES.LOBBY) {
     show.players = true;
     show.game = true;
+    show.betting = true;
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
     show.room = true;
   } else if (roomState.phase === PHASES.BIDDING) {
     show.game = true;
+    show.betting = true;
+    show.view = true;
+    show.sceneTuning = true;
+    show.debugTable = true;
+    show.room = true;
+  } else if (roomState.phase === PHASES.BETTING) {
+    show.game = true;
+    show.betting = true;
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
     show.room = true;
   } else if (roomState.phase === PHASES.CHOOSE_MODE || roomState.phase === PHASES.CHOOSE_TRUMP) {
     show.game = true;
+    show.betting = true;
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
     show.room = true;
   } else if (roomState.phase === PHASES.PLAYING) {
     show.game = true;
+    show.betting = true;
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
@@ -1325,6 +1536,7 @@ function showSections() {
     show.room = true;
   } else {
     show.game = true;
+    show.betting = true;
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
@@ -1335,6 +1547,7 @@ function showSections() {
   sectionRoom.classList.toggle('hidden', !show.room);
   sectionPlayers.classList.toggle('hidden', !show.players);
   sectionGame.classList.toggle('hidden', !show.game);
+  sectionBetting.classList.toggle('hidden', !show.betting);
   sectionView.classList.toggle('hidden', !show.view);
   sectionSceneTuning.classList.toggle('hidden', !show.sceneTuning);
   sectionDebugTable.classList.toggle('hidden', !show.debugTable);
@@ -1371,6 +1584,10 @@ function updateActionModal() {
   }
 
   const phase = roomState.phase;
+  if (phase === PHASES.BETTING) {
+    closeActionModal();
+    return;
+  }
   const canBidNow = localTurnToBid();
   const canChooseMode = phase === PHASES.CHOOSE_MODE && localIsBidder();
   const canChooseTrump = phase === PHASES.CHOOSE_TRUMP && localIsBidder() && roomState.mode === MODES.TRUMPS;
@@ -1470,6 +1687,104 @@ function updateActionModal() {
       actionModalButtons.appendChild(btn);
     }
   }
+}
+
+function closeBettingModal() {
+  if (!bettingModal) return;
+  bettingModal.classList.add('hidden');
+  bettingModalButtons?.replaceChildren();
+}
+
+function updateBettingModal() {
+  if (!bettingModal || !bettingModalTitle || !bettingModalBody || !bettingModalPot || !bettingModalButtons) {
+    return;
+  }
+  if (!roomState || roomState.phase !== PHASES.BETTING || !roomState.pendingBets) {
+    closeBettingModal();
+    return;
+  }
+
+  const localSeat = getLocalSeat();
+  const responses = roomState.pendingBets.responses || {};
+  const amount = Math.max(1, Number(roomState.pendingBets.amount || roomState.baseBetAmount || 10));
+  const myStatus = Number.isInteger(localSeat) ? responses[String(localSeat)] : null;
+  const remaining = Object.values(responses).filter((value) => value === 'pending').length;
+  const isPending = Number.isInteger(localSeat) && myStatus === 'pending';
+
+  bettingModal.classList.remove('hidden');
+  bettingModalTitle.textContent = 'Betting';
+  bettingModalPot.textContent = `Base ${amount} | Pot ${Number(roomState.pendingBets.pot || 0)} | Waiting ${remaining}`;
+  bettingModalButtons.replaceChildren();
+
+  if (!Number.isInteger(localSeat)) {
+    bettingModalBody.textContent = 'You are spectating. Waiting for bets...';
+    return;
+  }
+
+  if (!isPending) {
+    const statusText = myStatus === 'called' ? 'CALLED' : 'FOLDED';
+    bettingModalBody.textContent = `Waiting for other players... Your choice: ${statusText}`;
+    return;
+  }
+
+  bettingModalBody.textContent = `Seat ${localSeat + 1}: choose CALL or FOLD for this hand.`;
+  const callBtn = createActionButton(`Call (${amount})`, () => {
+    sendAction('betting:respond', { decision: 'called' });
+  });
+  const foldBtn = createActionButton('Fold', () => {
+    sendAction('betting:respond', { decision: 'folded' });
+  });
+  bettingModalButtons.append(callBtn, foldBtn);
+}
+
+function updateBettingControls() {
+  const connected = isConnected();
+  const isHost = roomState?.hostClientId === localClientId;
+  const enabled = !!roomState?.bettingEnabled;
+  const amount = Math.max(1, Number(roomState?.baseBetAmount || 10));
+
+  if (bettingEnabledToggle) {
+    bettingEnabledToggle.checked = enabled;
+    bettingEnabledToggle.disabled = !connected || !roomState || !isHost;
+  }
+  if (betAmountInput) {
+    betAmountInput.value = `${amount}`;
+    betAmountInput.disabled = !connected || !roomState || !isHost;
+  }
+  if (betAmountValue) {
+    betAmountValue.textContent = `${amount}`;
+  }
+
+  if (!roomState) {
+    if (bettingStateText) bettingStateText.textContent = 'Betting Off';
+    if (bettingTotals) bettingTotals.replaceChildren();
+    closeBettingModal();
+    return;
+  }
+
+  if (bettingStateText) {
+    if (!enabled) {
+      bettingStateText.textContent = 'Betting Off';
+    } else if (roomState.phase === PHASES.BETTING && roomState.pendingBets) {
+      const waiting = Object.values(roomState.pendingBets.responses || {}).filter((value) => value === 'pending').length;
+      bettingStateText.textContent = `Betting Open | Pot ${Number(roomState.pendingBets.pot || 0)} | Waiting ${waiting}`;
+    } else {
+      bettingStateText.textContent = 'Betting On';
+    }
+  }
+
+  if (bettingTotals) {
+    bettingTotals.replaceChildren();
+    for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
+      const seat = roomState.seats?.[seatIndex];
+      const chips = Number(roomState.sessionBankroll?.[String(seatIndex)] ?? 0);
+      const line = document.createElement('div');
+      line.textContent = `Seat ${seatIndex + 1} (${seat?.name || `Seat ${seatIndex + 1}`}): ${chips}`;
+      bettingTotals.appendChild(line);
+    }
+  }
+
+  updateBettingModal();
 }
 
 function renderTallies(svg, value) {
@@ -2803,7 +3118,7 @@ function environmentRootFor(entry) {
   if (entry?.root && typeof entry.root === 'string') {
     return entry.root.replace(/\/$/, '');
   }
-  return `/assets/environments/${entry?.id || 'default_lounge'}`;
+  return `/assets/environments/${entry?.id || 'casino_lounge'}`;
 }
 
 async function fetchEnvironmentFiles(entry) {
@@ -2848,16 +3163,27 @@ function findTextureFile(files, { dirHint, tags = [] }) {
   return candidates[0] || '';
 }
 
-function mapCasinoLoungeAssets(files) {
-  const floorDir = '/materials/floor/';
-  const wallDir = '/materials/walls/';
-  const trimDir = '/materials/trim/';
+function findTextureInDirs(files, dirHints, tags) {
+  for (const hint of dirHints) {
+    const found = findTextureFile(files, { dirHint: hint, tags });
+    if (found) return found;
+  }
+  return '';
+}
+
+function mapRoomAssets(files, environmentId) {
+  const floorDirs = environmentId === 'casino_lounge'
+    ? ['/materials/carpet/', '/materials/floor/']
+    : ['/materials/floor/', '/materials/carpet/'];
+  const wallDirs = ['/materials/walls/'];
+  const trimDirs = ['/materials/trim/'];
   const baseTags = ['basecolor', 'base_color', 'albedo', 'diffuse', 'color'];
   const normalTags = ['normal', '_nrm', '_n'];
   const roughTags = ['roughness', 'rough'];
   const aoTags = ['ambientocclusion', 'ambient_occlusion', 'ao'];
-
-  const hdri = files.find((file) => file.toLowerCase().includes('/hdri/') && file.toLowerCase().endsWith('.hdr')) || '';
+  const hdriFiles = files.filter((file) => file.toLowerCase().includes('/hdri/') && file.toLowerCase().endsWith('.hdr'));
+  const preferredCasinoHdr = hdriFiles.find((file) => file.toLowerCase().includes('anniversary_lounge_4k.hdr'));
+  const hdri = (environmentId === 'casino_lounge' && preferredCasinoHdr) ? preferredCasinoHdr : (hdriFiles[0] || '');
   const props = files.filter((file) => {
     const low = file.toLowerCase();
     return low.includes('/props/') && (low.endsWith('.glb') || low.endsWith('.gltf') || low.endsWith('.obj'));
@@ -2865,22 +3191,22 @@ function mapCasinoLoungeAssets(files) {
 
   return {
     floor: {
-      base: findTextureFile(files, { dirHint: floorDir, tags: baseTags }),
-      normal: findTextureFile(files, { dirHint: floorDir, tags: normalTags }),
-      roughness: findTextureFile(files, { dirHint: floorDir, tags: roughTags }),
-      ao: findTextureFile(files, { dirHint: floorDir, tags: aoTags })
+      base: findTextureInDirs(files, floorDirs, baseTags),
+      normal: findTextureInDirs(files, floorDirs, normalTags),
+      roughness: findTextureInDirs(files, floorDirs, roughTags),
+      ao: findTextureInDirs(files, floorDirs, aoTags)
     },
     walls: {
-      base: findTextureFile(files, { dirHint: wallDir, tags: baseTags }),
-      normal: findTextureFile(files, { dirHint: wallDir, tags: normalTags }),
-      roughness: findTextureFile(files, { dirHint: wallDir, tags: roughTags }),
-      ao: findTextureFile(files, { dirHint: wallDir, tags: aoTags })
+      base: findTextureInDirs(files, wallDirs, baseTags),
+      normal: findTextureInDirs(files, wallDirs, normalTags),
+      roughness: findTextureInDirs(files, wallDirs, roughTags),
+      ao: findTextureInDirs(files, wallDirs, aoTags)
     },
     trim: {
-      base: findTextureFile(files, { dirHint: trimDir, tags: baseTags }),
-      normal: findTextureFile(files, { dirHint: trimDir, tags: normalTags }),
-      roughness: findTextureFile(files, { dirHint: trimDir, tags: roughTags }),
-      ao: findTextureFile(files, { dirHint: trimDir, tags: aoTags })
+      base: findTextureInDirs(files, trimDirs, baseTags),
+      normal: findTextureInDirs(files, trimDirs, normalTags),
+      roughness: findTextureInDirs(files, trimDirs, roughTags),
+      ao: findTextureInDirs(files, trimDirs, aoTags)
     },
     hdri,
     props
@@ -2960,9 +3286,9 @@ function addCasinoTrim(roomRoot, roomWidth, roomDepth, wallHeight, material) {
   roomRoot.add(rightTrim);
 }
 
-async function buildCasinoLoungeEnvironment(entry, token) {
+async function buildRoomEnvironment(entry, token, environmentId) {
   const roomRoot = new THREE.Group();
-  roomRoot.name = 'casinoRoomRoot';
+  roomRoot.name = `${environmentId || 'room'}Root`;
   roomRoot.position.set(0, -0.02, 0);
 
   const roomWidth = 18;
@@ -3026,23 +3352,27 @@ async function buildCasinoLoungeEnvironment(entry, token) {
 
   const catalog = await fetchEnvironmentFiles(entry);
   if (token !== environmentApplyToken) return;
-  const mapped = mapCasinoLoungeAssets(catalog);
+  const mapped = mapRoomAssets(catalog, environmentId);
   const missing = [];
   if (!mapped.floor.base) missing.push('missing floor texture');
   if (!mapped.walls.base) missing.push('missing wall texture');
   if (!mapped.trim.base) missing.push('missing trim texture');
   if (!mapped.hdri) missing.push('missing HDR');
 
+  const floorRepeat = environmentId === 'casino_lounge' ? [12, 14] : [8, 10];
+  const wallRepeat = [4, 3];
+  const trimRepeat = [7, 2];
+
   const [floorBase, floorNormal, floorRough, wallBase, wallNormal, wallRough, trimBase, trimNormal, trimRough] = await Promise.all([
-    loadEnvironmentTexture(mapped.floor.base, { srgb: true, repeat: [10, 12] }),
-    loadEnvironmentTexture(mapped.floor.normal, { srgb: false, repeat: [10, 12] }),
-    loadEnvironmentTexture(mapped.floor.roughness, { srgb: false, repeat: [10, 12] }),
-    loadEnvironmentTexture(mapped.walls.base, { srgb: true, repeat: [4, 3] }),
-    loadEnvironmentTexture(mapped.walls.normal, { srgb: false, repeat: [4, 3] }),
-    loadEnvironmentTexture(mapped.walls.roughness, { srgb: false, repeat: [4, 3] }),
-    loadEnvironmentTexture(mapped.trim.base, { srgb: true, repeat: [7, 2] }),
-    loadEnvironmentTexture(mapped.trim.normal, { srgb: false, repeat: [7, 2] }),
-    loadEnvironmentTexture(mapped.trim.roughness, { srgb: false, repeat: [7, 2] })
+    loadEnvironmentTexture(mapped.floor.base, { srgb: true, repeat: floorRepeat }),
+    loadEnvironmentTexture(mapped.floor.normal, { srgb: false, repeat: floorRepeat }),
+    loadEnvironmentTexture(mapped.floor.roughness, { srgb: false, repeat: floorRepeat }),
+    loadEnvironmentTexture(mapped.walls.base, { srgb: true, repeat: wallRepeat }),
+    loadEnvironmentTexture(mapped.walls.normal, { srgb: false, repeat: wallRepeat }),
+    loadEnvironmentTexture(mapped.walls.roughness, { srgb: false, repeat: wallRepeat }),
+    loadEnvironmentTexture(mapped.trim.base, { srgb: true, repeat: trimRepeat }),
+    loadEnvironmentTexture(mapped.trim.normal, { srgb: false, repeat: trimRepeat }),
+    loadEnvironmentTexture(mapped.trim.roughness, { srgb: false, repeat: trimRepeat })
   ]);
 
   if (token !== environmentApplyToken) return;
@@ -3100,12 +3430,39 @@ async function buildCasinoLoungeEnvironment(entry, token) {
         // Optional props are best-effort.
       }
     }
+  } else {
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      map: trimBase || woodTexture,
+      color: 0xffffff,
+      roughness: 0.62,
+      metalness: 0.02
+    });
+    const lampColor = environmentId === 'neon_arcade' ? 0x66ccff : 0xffcc8b;
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.07), frameMaterial);
+    frame.position.set(-5.6, 2.4, -9.2);
+    frame.castShadow = true;
+    frame.receiveShadow = true;
+    roomRoot.add(frame);
+
+    const frame2 = frame.clone();
+    frame2.position.set(5.6, 2.5, -9.1);
+    frame2.rotation.y = -0.1;
+    roomRoot.add(frame2);
+
+    const lampStem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.06, 1.8, 10),
+      frameMaterial
+    );
+    lampStem.position.set(0, 0.9, -8.9);
+    const lampGlow = new THREE.PointLight(lampColor, 0.48, 7.2, 2);
+    lampGlow.position.set(0, 1.9, -8.9);
+    roomRoot.add(lampStem, lampGlow);
   }
 
   if (token !== environmentApplyToken) return;
   const dedupedMissing = [...new Set(missing)];
   if (dedupedMissing.length) {
-    console.warn('[env] Casino Lounge fallback assets:', dedupedMissing.join(', '));
+    console.warn(`[env] ${environmentId} fallback assets:`, dedupedMissing.join(', '));
     setEnvironmentLoadStatus('fallback', dedupedMissing.join(', '));
   } else {
     setEnvironmentLoadStatus('ok');
@@ -3113,7 +3470,10 @@ async function buildCasinoLoungeEnvironment(entry, token) {
 }
 
 function applyEnvironment(environmentId) {
-  const safeId = environmentById.has(environmentId) ? environmentId : 'default_lounge';
+  const fallbackEnvId = environmentById.has('casino_lounge')
+    ? 'casino_lounge'
+    : (environmentCatalog[0]?.id || 'casino_lounge');
+  const safeId = environmentById.has(environmentId) ? environmentId : fallbackEnvId;
   if (currentEnvironmentId === safeId) return;
   currentEnvironmentId = safeId;
   environmentApplyToken += 1;
@@ -3141,155 +3501,21 @@ function applyEnvironment(environmentId) {
   rimLight.position.set(...preset.rim.pos);
 
   scene.fog = new THREE.Fog(preset.fog.color, preset.fog.near, preset.fog.far);
-
-  if (safeId === 'casino_lounge') {
-    scene.background = new THREE.Color(0x1c1512);
-    void buildCasinoLoungeEnvironment({
-      ...entry,
-      root: environmentRootFor(entry)
-    }, token).catch(() => {
-      if (token !== environmentApplyToken) return;
-      const fallbackSky = getSkyTexture('casino_lounge-fallback', '#4e3b2e', '#17110d');
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(56, 36, 20),
-        new THREE.MeshBasicMaterial({ map: fallbackSky, side: THREE.BackSide, depthWrite: false })
-      );
-      themeGroup.add(dome);
-      setEnvironmentLoadStatus('fallback', 'missing HDR/texture');
-    });
-    updateEnvironmentControls();
-    return;
-  }
-
-  const skyTex = getSkyTexture(safeId, preset.top, preset.bottom);
-  const skyDome = new THREE.Mesh(
-    new THREE.SphereGeometry(56, 36, 20),
-    new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, depthWrite: false })
-  );
-  themeGroup.add(skyDome);
+  scene.environment = null;
   scene.background = new THREE.Color(preset.bottom);
-
-  const backgroundStage = new THREE.Group();
-  const backPanel = new THREE.Mesh(
-    new THREE.PlaneGeometry(24, 10),
-    new THREE.MeshStandardMaterial({
-      color: 0x11161c,
-      emissive: new THREE.Color(preset.top),
-      emissiveIntensity: 0.2,
-      roughness: 0.9,
-      metalness: 0.0
-    })
-  );
-  backPanel.position.set(0, 2.6, -11.5);
-  backgroundStage.add(backPanel);
-
-  const addLantern = (x, z, warm = 0xffc37e) => {
-    const pole = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.09, 2.2, 10),
-      new THREE.MeshStandardMaterial({ map: woodTexture, color: 0xffffff, roughness: 0.62, metalness: 0.0 })
+  void buildRoomEnvironment({
+    ...entry,
+    root: environmentRootFor(entry)
+  }, token, safeId).catch(() => {
+    if (token !== environmentApplyToken) return;
+    const fallbackSky = getSkyTexture(`${safeId}-fallback`, preset.top, preset.bottom);
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(56, 36, 20),
+      new THREE.MeshBasicMaterial({ map: fallbackSky, side: THREE.BackSide, depthWrite: false })
     );
-    pole.position.set(x, 1.1, z);
-    const orb = new THREE.Mesh(
-      new THREE.SphereGeometry(0.2, 14, 12),
-      new THREE.MeshStandardMaterial({ color: 0xf8ddb4, emissive: warm, emissiveIntensity: 0.35, roughness: 0.4 })
-    );
-    orb.position.set(x, 2.15, z);
-    const lamp = new THREE.PointLight(warm, 0.45, 8.8, 2);
-    lamp.position.set(x, 2.2, z);
-    backgroundStage.add(pole, orb, lamp);
-  };
-
-  switch (safeId) {
-    case 'witch_parlor':
-      backgroundStage.add(makeCandle(-3.2, -8.8, 0xba77ff));
-      backgroundStage.add(makeCandle(0.0, -9.3, 0x9cfa74));
-      backgroundStage.add(makeCandle(3.2, -8.7, 0xba77ff));
-      break;
-    case 'zombie_graveyard': {
-      const moon = new THREE.Mesh(
-        new THREE.SphereGeometry(1.2, 24, 18),
-        new THREE.MeshStandardMaterial({ color: 0xd7e6ff, emissive: 0x9bbfff, emissiveIntensity: 0.42, roughness: 0.84 })
-      );
-      moon.position.set(-7.8, 7.1, -15.5);
-      backgroundStage.add(moon);
-      for (let i = 0; i < 3; i += 1) {
-        const fogPlane = new THREE.Mesh(
-          new THREE.PlaneGeometry(13, 2.3),
-          new THREE.MeshBasicMaterial({ color: 0xc9d8df, transparent: true, opacity: 0.12, depthWrite: false })
-        );
-        fogPlane.position.set(-6 + i * 6, 0.9 + i * 0.15, -8.6 - i * 1.4);
-        backgroundStage.add(fogPlane);
-      }
-      break;
-    }
-    case 'pirate_cove':
-      addLantern(-4.8, -9.0, 0xffcf82);
-      addLantern(4.8, -8.7, 0xffcf82);
-      break;
-    case 'cowboy_saloon':
-      addLantern(-4.5, -8.9, 0xffbd70);
-      addLantern(4.5, -8.9, 0xffbd70);
-      break;
-    case 'ninja_dojo': {
-      const panel = new THREE.Mesh(
-        new THREE.PlaneGeometry(16, 7),
-        new THREE.MeshStandardMaterial({ color: 0x2a3038, roughness: 0.92, metalness: 0.0 })
-      );
-      panel.position.set(0, 2.8, -10.9);
-      backgroundStage.add(panel);
-      break;
-    }
-    case 'knight_castle': {
-      for (let i = -1; i <= 1; i += 1) {
-        const banner = new THREE.Mesh(
-          new THREE.PlaneGeometry(1.0, 2.4),
-          new THREE.MeshStandardMaterial({ color: 0x6b2d2d, roughness: 0.88 })
-        );
-        banner.position.set(i * 2.1, 3.5, -10.8);
-        backgroundStage.add(banner);
-      }
-      break;
-    }
-    case 'goblin_cave':
-      backgroundStage.add(makeCandle(-3.4, -8.9, 0x77ff96));
-      backgroundStage.add(makeCandle(3.4, -8.9, 0x77ff96));
-      break;
-    case 'elf_forest':
-      addLantern(-3.6, -8.7, 0x9ee8a9);
-      addLantern(3.6, -8.5, 0x9ee8a9);
-      break;
-    case 'wizard_tower':
-      addLantern(-3.5, -8.8, 0x7ea7ff);
-      addLantern(3.5, -8.8, 0x7ea7ff);
-      break;
-    case 'hospital_clinic':
-      addLantern(-2.8, -8.7, 0xaad6ff);
-      addLantern(2.8, -8.7, 0xaad6ff);
-      break;
-    case 'battlefield':
-      addLantern(-4.0, -8.7, 0xff9e7d);
-      addLantern(4.0, -8.7, 0xff9e7d);
-      break;
-    case 'kitchen':
-      addLantern(-2.9, -8.7, 0xffc994);
-      addLantern(2.9, -8.7, 0xffc994);
-      break;
-    case 'modern_office':
-      addLantern(-3.2, -8.8, 0xa7c7e9);
-      addLantern(3.2, -8.8, 0xa7c7e9);
-      break;
-    case 'viking_longhouse':
-      addLantern(-3.6, -8.8, 0xffb071);
-      addLantern(3.6, -8.8, 0xffb071);
-      break;
-    default:
-      addLantern(-3.2, -8.7, 0xf1c786);
-      addLantern(3.2, -8.7, 0xf1c786);
-      break;
-  }
-
-  themeGroup.add(backgroundStage);
-  setEnvironmentLoadStatus('ok');
+    themeGroup.add(dome);
+    setEnvironmentLoadStatus('fallback', 'missing HDR/texture');
+  });
   updateEnvironmentControls();
 }
 
@@ -3596,6 +3822,7 @@ function updateHud() {
     updateMarksMenu();
     updateBurnPanels();
     updateTimerControls();
+    updateBettingControls();
     updateEnvironmentControls();
     updateTableDominoDebugReadout(0);
     return;
@@ -3608,6 +3835,7 @@ function updateHud() {
   updateMarksMenu();
   updateBurnPanels();
   updateTimerControls();
+  updateBettingControls();
   updateEnvironmentControls();
   updateTableDominoDebugReadout(roomState.trick?.length || 0);
 }
@@ -3645,7 +3873,7 @@ function updateTimerHud() {
 
 function updateEnvironmentControls() {
   if (!environmentCatalog.length) {
-    environmentSelect.innerHTML = '<option value="default_lounge">default_lounge</option>';
+    environmentSelect.innerHTML = '<option value="casino_lounge">casino_lounge</option>';
     environmentSelect.disabled = true;
     environmentPreview.removeAttribute('src');
     environmentStateText.textContent = 'Loading backgrounds...';
@@ -3782,12 +4010,8 @@ function setupSceneTuningControls() {
 
 function updateNameplates() {
   const seatBids = roomState?.bidBySeat || { 0: '-', 1: '-', 2: '-', 3: '-' };
-  const marks = roomState?.gameMarks || { teamA: 0, teamB: 0 };
-  const maxMarks = Math.max(marks.teamA || 0, marks.teamB || 0);
-  const tied = (marks.teamA || 0) === (marks.teamB || 0);
-  const crownTeam = maxMarks > 0 && !tied ? (marks.teamA > marks.teamB ? 'teamA' : 'teamB') : null;
+  const crownTeam = roomState?.lastSevenMarksWinnerTeam || null;
   const localSeat = getLocalSeat();
-  const timerRemainingMs = currentTimerRemainingMs();
 
   for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
     const node = document.getElementById(`nameplate-${seatIndex}`);
@@ -3799,19 +4023,13 @@ function updateNameplates() {
     };
 
     const active = roomState?.turnSeat === seatIndex;
-    const role = seat.type === 'cpu'
-      ? `CPU L${seat.cpuLevel ?? 0}`
-      : seat.occupantClientId
-        ? (seat.occupantClientId === localClientId ? 'YOU' : 'HUMAN')
-        : 'OPEN';
-
     const crown = crownTeam && teamForSeat(seatIndex) === crownTeam ? ' 👑' : '';
     const bidValue = roomState?.phase === PHASES.BIDDING
       ? (seatIndex === localSeat && pendingLocalBidChoice != null ? pendingLocalBidChoice : (seatBids[seatIndex] || 'PASS'))
-      : null;
-    const bidText = bidValue != null ? ` | Bid: ${bidValue}` : '';
+      : seatIndex === roomState?.bidderSeat && roomState?.bidValue != null
+        ? roomState.bidValue
+        : '-';
     const teamTag = teamForSeat(seatIndex) === 'teamA' ? 'Team 1' : 'Team 2';
-    const timerText = active && roomState?.turnTimerEnabled && timerRemainingMs != null ? ` | TIME ${formatTimerMs(timerRemainingMs)}` : '';
     const canEditName = localSeat === seatIndex && seat.type === 'human';
     const nameSafe = String(seat.name || `Seat ${seatIndex + 1}`).replace(/"/g, '&quot;');
 
@@ -3819,7 +4037,7 @@ function updateNameplates() {
       <div class="dragHandle" data-drag-seat="${seatIndex}" title="Drag">MOVE</div>
       <div class="teamTag">${teamTag}</div>
       <div class="seatName">${seat.name || `Seat ${seatIndex + 1}`}${crown}</div>
-      <div class="seatMeta">${role}${bidText}${timerText}</div>
+      <div class="seatMeta">Bid: ${bidValue}</div>
       ${canEditName ? `<input class="nameInput" data-seat-name="${seatIndex}" maxlength="24" value="${nameSafe}" />` : ''}
     `;
 
@@ -3961,13 +4179,20 @@ function renderSeatControls() {
 
     if (action === 'setType') {
       el.addEventListener('change', () => {
-        sendAction('setSeatType', {
+        pendingSeatTypeTransformGuard = {
+          seatIndex,
+          before: captureSeatTypeTransformSnapshot(),
+          at: Date.now()
+        };
+        const sent = sendAction('setSeatType', {
           seatIndex,
           type: el.value,
           cpuLevel: roomState.seats[seatIndex].cpuLevel,
-          claimForSelf: el.value === 'human',
           name: getStoredPlayerName()
         });
+        if (!sent) {
+          pendingSeatTypeTransformGuard = null;
+        }
       });
     }
 
@@ -4152,11 +4377,13 @@ function applyStoredNameIfNeeded() {
 }
 
 function applySnapshot(room) {
+  const prevRoomState = roomState;
   if (room?.localClientId) {
     localClientId = String(room.localClientId);
     localStorage.setItem(PLAYER_ID_STORAGE_KEY, localClientId);
   }
-  const prevPhase = roomState?.phase || null;
+  const prevPhase = prevRoomState?.phase || null;
+  const prevSevenWinner = prevRoomState?.lastSevenMarksWinnerTeam || null;
   const prevLocalSeat = lastLocalSeat;
   roomState = room;
 
@@ -4166,7 +4393,9 @@ function applySnapshot(room) {
     storedAvatarAppliedSeat = null;
     storedNameAppliedSeat = null;
     updateSeatTransforms();
-    resetViewForLocalSeat(true);
+    if (roomState.phase !== PHASES.LOBBY) {
+      resetViewForLocalSeat(true);
+    }
   }
 
   if (selectedDominoTileId && newLocalSeat != null) {
@@ -4180,9 +4409,13 @@ function applySnapshot(room) {
     resetViewForLocalSeat(true);
   }
 
+  if (prevSevenWinner !== roomState.lastSevenMarksWinnerTeam && roomState.lastSevenMarksWinnerTeam) {
+    playPartyBlower();
+  }
+
   applyStoredAvatarIfNeeded();
   applyStoredNameIfNeeded();
-  applyEnvironment(roomState.environmentId || 'default_lounge');
+  applyEnvironment(roomState.environmentId || 'casino_lounge');
   if (roomState.timeoutPenalty && Number.isInteger(roomState.timeoutPenalty.seat)) {
     showTimeoutPenaltyEmoji(
       roomState.timeoutPenalty.seat,
@@ -4199,15 +4432,26 @@ function applySnapshot(room) {
   updateBidControls();
   updateTrumpControls();
   renderHandsAndTrick();
-  renderAvatars();
+  const avatarsChanged = !prevRoomState || !Array.isArray(prevRoomState.seats) || !Array.isArray(roomState.seats)
+    || roomState.seats.some((seat, index) => {
+      const prevSeat = prevRoomState.seats[index];
+      return !prevSeat || prevSeat.avatarId !== seat.avatarId;
+    });
+  if (avatarsChanged) {
+    renderAvatars();
+  } else {
+    updateSeatTransforms();
+  }
   roomChangingAvatarOptimistic = false;
+  enforceSeatTypeTransformGuard();
 }
 
 function resetRoomLocally() {
   roomState = null;
   lastLocalSeat = null;
   clearTimeoutPenaltyEmojis();
-  applyEnvironment('default_lounge');
+  closeBettingModal();
+  applyEnvironment('casino_lounge');
   updateHud();
   showSections();
   setPanelOpen(true);
@@ -4251,9 +4495,17 @@ function handleServerPacket(data) {
     if (!roomState || !Number.isInteger(data.seatIndex)) return;
     const seat = roomState.seats?.[data.seatIndex];
     if (!seat) return;
-    if (data.avatarId != null) seat.avatarId = data.avatarId;
+    let avatarChanged = false;
+    if (data.avatarId != null && seat.avatarId !== data.avatarId) {
+      seat.avatarId = data.avatarId;
+      avatarChanged = true;
+    }
     if (typeof data.name === 'string') seat.name = data.name;
-    renderAvatars();
+    if (avatarChanged) {
+      renderAvatars();
+    } else {
+      updateSeatTransforms();
+    }
     updateNameplates();
     renderSeatControls();
     return;
@@ -4293,7 +4545,7 @@ function handleServerPacket(data) {
   if (data.type === 'game:environmentChanged') {
     if (!roomState) return;
     roomState.environmentId = data.environmentId || roomState.environmentId;
-    applyEnvironment(roomState.environmentId || 'default_lounge');
+    applyEnvironment(roomState.environmentId || 'casino_lounge');
     updateEnvironmentControls();
     return;
   }
@@ -4304,6 +4556,9 @@ function handleServerPacket(data) {
   }
 
   if (data.type === 'error') {
+    if (data.action === 'setSeatType') {
+      pendingSeatTypeTransformGuard = null;
+    }
     if (roomChangingAvatarOptimistic) {
       roomChangingAvatarOptimistic = false;
     }
@@ -4341,6 +4596,7 @@ function connect() {
     networkLastDisconnectReason = '';
     syncSocketInfoFromSingleton();
     updateSocketUi();
+    updateBettingControls();
     sendClientHello();
     logMessage('Connected', 1300);
   });
@@ -4350,6 +4606,7 @@ function connect() {
     syncSocketInfoFromSingleton();
     updateSocketUi();
     updateTimerControls();
+    updateBettingControls();
     updateEnvironmentControls();
     updateBidControls();
     updateTrumpControls();
@@ -4388,6 +4645,7 @@ function connect() {
   });
 
   socketRef.on('game:dominoPlayed', (payload) => {
+    playDominoThud();
     const trickState = Array.isArray(payload?.trickState) ? payload.trickState : null;
     if (trickState) {
       renderTableTrick(trickState);
@@ -4430,7 +4688,8 @@ async function initHdrEnvironment() {
   };
 
   const hdrCandidates = [
-    '/assets/environments/default_lounge/warm_interior_01.hdr',
+    '/assets/environments/casino_lounge/hdri/anniversary_lounge_4k.hdr',
+    '/assets/environments/casino_lounge/hdri/wooden_lounge_4k.hdr',
     '/assets/hdr/warm_interior_01.hdr'
   ];
 
@@ -4525,6 +4784,41 @@ function ensureButtons() {
   timerPauseBtn.addEventListener('click', () => {
     if (!roomState) return;
     sendAction('host:timerPause', { paused: !roomState.turnTimerPaused });
+  });
+
+  bettingEnabledToggle?.addEventListener('change', () => {
+    sendAction('host:bettingEnable', {
+      enabled: !!bettingEnabledToggle.checked,
+      baseBetAmount: Number(betAmountInput?.value || roomState?.baseBetAmount || 10)
+    });
+  });
+
+  betAmountInput?.addEventListener('input', () => {
+    const amount = Math.max(1, Math.min(100, Number(betAmountInput.value) || 10));
+    betAmountInput.value = `${amount}`;
+    if (betAmountValue) {
+      betAmountValue.textContent = `${amount}`;
+    }
+  });
+
+  betAmountInput?.addEventListener('change', () => {
+    const amount = Math.max(1, Math.min(100, Number(betAmountInput.value) || 10));
+    betAmountInput.value = `${amount}`;
+    sendAction('host:setBetAmount', { amount });
+  });
+
+  muteToggle?.addEventListener('change', () => {
+    setMuted(!!muteToggle.checked, { persist: true });
+  });
+
+  tableHudScaleInput?.addEventListener('input', () => {
+    tableHudSettings.scale = Number(tableHudScaleInput.value);
+    applyTableHudSettings({ persist: true });
+  });
+
+  tableHudDragHandle?.addEventListener('pointerdown', (event) => {
+    beginTableHudDrag(event.pointerId, event.clientX, event.clientY);
+    event.preventDefault();
   });
 
   environmentSelect.addEventListener('change', () => {
@@ -4637,12 +4931,26 @@ function ensureButtons() {
     updateDraggedNameplate(event.clientX, event.clientY);
   });
 
+  window.addEventListener('pointermove', (event) => {
+    if (!draggingTableHud) return;
+    if (tableHudPointerId != null && event.pointerId !== tableHudPointerId) return;
+    updateTableHudDrag(event.clientX, event.clientY);
+  });
+
   window.addEventListener('pointerup', (event) => {
     if (draggingPointerId != null && event.pointerId !== draggingPointerId) return;
     endNameplateDrag();
   });
 
-  window.addEventListener('pointercancel', endNameplateDrag);
+  window.addEventListener('pointerup', (event) => {
+    if (tableHudPointerId != null && event.pointerId !== tableHudPointerId) return;
+    endTableHudDrag();
+  });
+
+  window.addEventListener('pointercancel', () => {
+    endNameplateDrag();
+    endTableHudDrag();
+  });
 
   window.addEventListener('keydown', (event) => {
     if (event.key.toLowerCase() === 'd' && event.shiftKey) {
@@ -4656,6 +4964,13 @@ function ensureButtons() {
       closeAvatarModal();
     }
   });
+
+  window.addEventListener('pointerdown', () => {
+    const ctx = ensureAudioContext();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+  }, { passive: true });
 }
 
 function addPointerInteraction() {
@@ -4840,7 +5155,8 @@ async function loadEnvironmentManifest() {
   }
 
   if (!entries.length) {
-    entries = Object.keys(ENV_THEME_PRESETS).map((id) => ({
+    const fallbackIds = ['casino_lounge', 'spooky_parlor', 'rustic_tavern', 'modern_suite', 'neon_arcade'];
+    entries = fallbackIds.map((id) => ({
       id,
       name: id.replace(/_/g, ' '),
       preview: '',
@@ -4854,13 +5170,15 @@ async function loadEnvironmentManifest() {
     environmentCatalog.push(entry);
     environmentById.set(entry.id, entry);
   });
-  if (!environmentById.has('default_lounge') && environmentCatalog.length) {
-    const first = environmentCatalog[0];
-    environmentById.set('default_lounge', first);
+  if (!environmentById.has('default_lounge')) {
+    const casinoEntry = environmentById.get('casino_lounge') || environmentCatalog[0] || null;
+    if (casinoEntry) {
+      environmentById.set('default_lounge', casinoEntry);
+    }
   }
 
   updateEnvironmentControls();
-  const targetEnv = roomState?.environmentId || 'default_lounge';
+  const targetEnv = roomState?.environmentId || 'casino_lounge';
   applyEnvironment(targetEnv);
 }
 
@@ -4873,8 +5191,11 @@ runBootStep('loadStoredViewSettings', loadStoredViewSettings);
 runBootStep('loadStoredSceneTuning', loadStoredSceneTuning);
 runBootStep('loadStoredChairVisibility', loadStoredChairVisibility);
 runBootStep('loadStoredBurnPanelOpacity', loadStoredBurnPanelOpacity);
+runBootStep('loadStoredTableHudSettings', loadStoredTableHudSettings);
+runBootStep('loadStoredMuteSetting', loadStoredMuteSetting);
 runBootStep('updateViewControlsUi', updateViewControlsUi);
 runBootStep('updateSceneTuningUi', updateSceneTuningUi);
+runBootStep('applyTableHudSettings', applyTableHudSettings);
 runBootStep('setupViewControls', setupViewControls);
 runBootStep('setupSceneTuningControls', setupSceneTuningControls);
 runBootStep('addPointerInteraction', addPointerInteraction);
@@ -4882,6 +5203,7 @@ runBootStep('showSections', showSections);
 runBootStep('setPanelOpen', () => setPanelOpen(true));
 runBootStep('updateScoreboard', updateScoreboard);
 runBootStep('updateTimerControls', updateTimerControls);
+runBootStep('updateBettingControls', updateBettingControls);
 runBootStep('updateTimerHud', updateTimerHud);
 runBootStep('updateEnvironmentControls', updateEnvironmentControls);
 runBootStep('updateSocketUi', updateSocketUi);

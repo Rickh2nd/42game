@@ -38,23 +38,14 @@ const AVATAR_MANIFEST_PATH = path.join(ROOT_DIR, 'client', 'assets', 'avatars', 
 const ENVIRONMENT_MANIFEST_PATH = path.join(ROOT_DIR, 'client', 'assets', 'environments', 'environments.json');
 const FALLBACK_ENVIRONMENT_IDS = [
   'casino_lounge',
-  'default_lounge',
-  'witch_parlor',
-  'zombie_graveyard',
-  'pirate_cove',
-  'cowboy_saloon',
-  'ninja_dojo',
-  'knight_castle',
-  'goblin_cave',
-  'elf_forest',
-  'wizard_tower',
-  'hospital_clinic',
-  'battlefield',
-  'kitchen',
-  'modern_office',
-  'viking_longhouse'
+  'spooky_parlor',
+  'rustic_tavern',
+  'modern_suite',
+  'neon_arcade'
 ];
 const SOCKET_PATH = '/socket.io';
+const BETTING_DEFAULT_BANKROLL = 1000;
+const BETTING_RESPONSE_WINDOW_MS = 20000;
 
 const app = express();
 app.get('/health', (_req, res) => {
@@ -277,6 +268,12 @@ function createRoom(roomId, hostClientId) {
     burnHandsTeamA: [],
     burnHandsTeamB: [],
     lastBurnContributor: { teamA: 0, teamB: 1 },
+    lastSevenMarksWinnerTeam: null,
+    bettingEnabled: false,
+    baseBetAmount: 10,
+    sessionBankroll: { 0: BETTING_DEFAULT_BANKROLL, 1: BETTING_DEFAULT_BANKROLL, 2: BETTING_DEFAULT_BANKROLL, 3: BETTING_DEFAULT_BANKROLL },
+    pendingBets: null,
+    bettingTimer: null,
     hands: { 0: [], 1: [], 2: [], 3: [] },
     handNumber: 0,
     sevensState: null,
@@ -396,6 +393,17 @@ function roomPublicSnapshot(room, viewerClientId) {
     roundWins: { ...room.roundWins },
     gameMarks: { ...room.gameMarks },
     champsTeam: room.champsTeam,
+    lastSevenMarksWinnerTeam: room.lastSevenMarksWinnerTeam || null,
+    bettingEnabled: !!room.bettingEnabled,
+    baseBetAmount: Number(room.baseBetAmount || 10),
+    sessionBankroll: { ...room.sessionBankroll },
+    pendingBets: room.pendingBets ? {
+      amount: Number(room.pendingBets.amount || 0),
+      pot: Number(room.pendingBets.pot || 0),
+      openedAtTs: Number(room.pendingBets.openedAtTs || 0),
+      closesAtTs: Number(room.pendingBets.closesAtTs || 0),
+      responses: { ...room.pendingBets.responses }
+    } : null,
     burnPiles: {
       teamA: room.burnPiles.teamA.map((tile) => ({ ...tile })),
       teamB: room.burnPiles.teamB.map((tile) => ({ ...tile }))
@@ -625,6 +633,10 @@ function clearRoomTimers(room) {
     clearTimeout(room.handOverTimer);
     room.handOverTimer = null;
   }
+  if (room.bettingTimer) {
+    clearTimeout(room.bettingTimer);
+    room.bettingTimer = null;
+  }
 }
 
 function seatByIndex(room, seatIndex) {
@@ -728,23 +740,19 @@ function prepareSeatsForGame(room) {
   }
 }
 
-function startNewHand(room, { resetMarks = false } = {}) {
-  clearRoomTimers(room);
-
-  if (resetMarks) {
-    room.roundWins = { teamA: 0, teamB: 0 };
-    room.gameMarks = { teamA: 0, teamB: 0 };
-    room.champsTeam = null;
-    room.handNumber = 0;
-    room.burnHandsTeamA = [];
-    room.burnHandsTeamB = [];
+function ensureSessionBankroll(room) {
+  if (!room.sessionBankroll || typeof room.sessionBankroll !== 'object') {
+    room.sessionBankroll = {};
   }
+  for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
+    const key = String(seatIndex);
+    if (!Number.isFinite(Number(room.sessionBankroll[key]))) {
+      room.sessionBankroll[key] = BETTING_DEFAULT_BANKROLL;
+    }
+  }
+}
 
-  prepareSeatsForGame(room);
-
-  const deck = buildShuffledDeck();
-  room.hands = dealHands(deck, [0, 1, 2, 3], 7);
-
+function resetForNewHand(room) {
   room.phase = PHASES.BIDDING;
   room.bidderSeat = null;
   room.bidValue = null;
@@ -760,14 +768,146 @@ function startNewHand(room, { resetMarks = false } = {}) {
   room.countPointsThisHand = { teamA: 0, teamB: 0 };
   room.targetThisHand = { teamA: 0, teamB: 0 };
   room.burnPiles = { teamA: [], teamB: [] };
-  room.burnHandsTeamA = Array.isArray(room.burnHandsTeamA) ? room.burnHandsTeamA : [];
-  room.burnHandsTeamB = Array.isArray(room.burnHandsTeamB) ? room.burnHandsTeamB : [];
+  room.burnHandsTeamA = [];
+  room.burnHandsTeamB = [];
   room.lastBurnContributor = { teamA: 0, teamB: 1 };
   room.activeSeats = [0, 1, 2, 3];
   room.sevensState = null;
   room.sevensResult = null;
   room.lastHandOutcome = null;
   room.timeoutPenalty = null;
+  room.pendingBets = null;
+  if (room.bettingTimer) {
+    clearTimeout(room.bettingTimer);
+    room.bettingTimer = null;
+  }
+}
+
+function resetForNewGame(room) {
+  room.roundWins = { teamA: 0, teamB: 0 };
+  room.gameMarks = { teamA: 0, teamB: 0 };
+  room.champsTeam = null;
+  room.lastSevenMarksWinnerTeam = null;
+  room.handNumber = 0;
+  room.sessionBankroll = {
+    0: BETTING_DEFAULT_BANKROLL,
+    1: BETTING_DEFAULT_BANKROLL,
+    2: BETTING_DEFAULT_BANKROLL,
+    3: BETTING_DEFAULT_BANKROLL
+  };
+  resetForNewHand(room);
+}
+
+function beginPlayingTricks(room) {
+  room.phase = PHASES.PLAYING;
+
+  if (room.mode === MODES.SEVENS) {
+    room.sevensState = {
+      comparisons: 0,
+      allStrictCloser: true,
+      immediateLoss: false,
+      soloSeat: room.bidderSeat
+    };
+    room.turnSeat = room.bidderSeat;
+  } else {
+    room.sevensState = null;
+    room.turnSeat = room.bidderSeat;
+  }
+  syncTurnTimerForState(room, { newTurn: true });
+}
+
+function closeBettingRound(room) {
+  if (!room.pendingBets) return;
+  const pending = room.pendingBets;
+  const responses = pending.responses || {};
+  for (const seatIndex of room.activeSeats || []) {
+    const key = String(seatIndex);
+    if (responses[key] === 'pending') {
+      responses[key] = 'folded';
+    }
+  }
+  if (room.bettingTimer) {
+    clearTimeout(room.bettingTimer);
+    room.bettingTimer = null;
+  }
+  room.pendingBets = {
+    ...pending,
+    responses
+  };
+  beginPlayingTricks(room);
+}
+
+function startBettingRound(room) {
+  ensureSessionBankroll(room);
+  const amount = Math.max(1, Number(room.baseBetAmount || 10));
+  const responses = {};
+  for (const seatIndex of room.activeSeats || []) {
+    responses[String(seatIndex)] = 'pending';
+  }
+  room.pendingBets = {
+    amount,
+    pot: 0,
+    openedAtTs: Date.now(),
+    closesAtTs: Date.now() + BETTING_RESPONSE_WINDOW_MS,
+    responses
+  };
+  room.phase = PHASES.BETTING;
+  room.turnSeat = null;
+  room.turnDeadlineTs = null;
+  room.turnRemainingMs = Number(room.turnTimeLimitMs || TURN_TIMER_DEFAULT_MS);
+  room.activeTurnId = Number(room.activeTurnId || 0) + 1;
+  if (room.bettingTimer) {
+    clearTimeout(room.bettingTimer);
+  }
+  room.bettingTimer = setTimeout(() => {
+    room.bettingTimer = null;
+    closeBettingRound(room);
+    broadcastRoom(room);
+    broadcastTurnTimer(room);
+    scheduleCpuIfNeeded(room);
+  }, BETTING_RESPONSE_WINDOW_MS);
+}
+
+function resolveBettingResponse(room, seatIndex, decision) {
+  if (room.phase !== PHASES.BETTING || !room.pendingBets) return false;
+  const key = String(seatIndex);
+  if (!Object.prototype.hasOwnProperty.call(room.pendingBets.responses, key)) return false;
+  if (room.pendingBets.responses[key] !== 'pending') return true;
+
+  ensureSessionBankroll(room);
+  const bankroll = Number(room.sessionBankroll[key] || 0);
+  const amount = Math.max(1, Number(room.pendingBets.amount || 10));
+  const called = decision === 'called' && bankroll >= amount;
+
+  if (called) {
+    room.sessionBankroll[key] = bankroll - amount;
+    room.pendingBets.pot = Number(room.pendingBets.pot || 0) + amount;
+    room.pendingBets.responses[key] = 'called';
+  } else {
+    room.pendingBets.responses[key] = 'folded';
+  }
+
+  const allResolved = Object.values(room.pendingBets.responses).every((status) => status !== 'pending');
+  if (allResolved) {
+    closeBettingRound(room);
+  }
+  return true;
+}
+
+function startNewHand(room, { resetMarks = false } = {}) {
+  clearRoomTimers(room);
+
+  if (resetMarks) {
+    resetForNewGame(room);
+  } else {
+    resetForNewHand(room);
+  }
+
+  prepareSeatsForGame(room);
+  ensureSessionBankroll(room);
+
+  const deck = buildShuffledDeck();
+  room.hands = dealHands(deck, [0, 1, 2, 3], 7);
 
   const first = nextSeat(room.dealerSeat);
   room.biddingOrder = [first, nextSeat(first), nextSeat(nextSeat(first)), room.dealerSeat];
@@ -848,7 +988,12 @@ function enterPlayingPhase(room) {
     trumpSuit: room.trumpSuit ?? null
   };
   room.targetThisHand = computeTargetThisHand(room.bidderSeat, room.bidValue);
-  syncTurnTimerForState(room, { newTurn: true });
+  if (room.bettingEnabled) {
+    startBettingRound(room);
+  } else {
+    room.pendingBets = null;
+    beginPlayingTricks(room);
+  }
 }
 
 function recordBurnHandForWinner(room, winnerTeam) {
@@ -876,14 +1021,47 @@ function recordBurnHandForWinner(room, winnerTeam) {
   }
 }
 
+function settleBettingPot(room, winnerTeam) {
+  if (!room.bettingEnabled || !room.pendingBets) return;
+  ensureSessionBankroll(room);
+  const pot = Number(room.pendingBets.pot || 0);
+  if (pot <= 0) {
+    room.pendingBets = null;
+    return;
+  }
+
+  const calledWinners = (room.activeSeats || []).filter((seatIndex) => {
+    const key = String(seatIndex);
+    return room.pendingBets.responses?.[key] === 'called' && getTeam(seatIndex) === winnerTeam;
+  });
+  if (!calledWinners.length) {
+    room.pendingBets = null;
+    return;
+  }
+
+  const baseShare = Math.floor(pot / calledWinners.length);
+  let remainder = pot % calledWinners.length;
+  for (const seatIndex of calledWinners) {
+    const key = String(seatIndex);
+    const extra = remainder > 0 ? 1 : 0;
+    if (remainder > 0) remainder -= 1;
+    room.sessionBankroll[key] = Number(room.sessionBankroll[key] || 0) + baseShare + extra;
+  }
+  room.pendingBets = null;
+}
+
 function finishHand(room) {
   const outcome = evaluateHandOutcome(room, room.config);
   recordBurnHandForWinner(room, outcome.winnerTeam);
+  settleBettingPot(room, outcome.winnerTeam);
   const nextScores = updateRoundWinsAndMarks(room.roundWins, room.gameMarks, outcome.winnerTeam, room.config);
 
   room.roundWins = nextScores.roundWins;
   room.gameMarks = nextScores.gameMarks;
   room.champsTeam = nextScores.champsTeam;
+  if (nextScores.markAwardedTeam) {
+    room.lastSevenMarksWinnerTeam = nextScores.markAwardedTeam;
+  }
   room.lastHandOutcome = {
     ...outcome,
     at: Date.now()
@@ -1033,7 +1211,52 @@ function projectCpuState(room) {
 }
 
 function scheduleCpuIfNeeded(room) {
-  if (![PHASES.BIDDING, PHASES.CHOOSE_MODE, PHASES.CHOOSE_TRUMP, PHASES.PLAYING].includes(room.phase)) {
+  if (![PHASES.BIDDING, PHASES.BETTING, PHASES.CHOOSE_MODE, PHASES.CHOOSE_TRUMP, PHASES.PLAYING].includes(room.phase)) {
+    return;
+  }
+
+  if (room.phase === PHASES.BETTING) {
+    if (!room.pendingBets || !Array.isArray(room.activeSeats)) return;
+    if (room.pendingCpuTimer) return;
+
+    let pendingCpuSeat = null;
+    for (const seatIndex of room.activeSeats) {
+      const response = room.pendingBets.responses?.[String(seatIndex)];
+      if (response !== 'pending') continue;
+      const seat = seatByIndex(room, seatIndex);
+      if (!seat || seat.type !== 'cpu') continue;
+      pendingCpuSeat = seatIndex;
+      break;
+    }
+
+    if (!Number.isInteger(pendingCpuSeat)) return;
+    const delay = 300 + Math.floor(Math.random() * 600);
+    room.pendingCpuTimer = setTimeout(() => {
+      room.pendingCpuTimer = null;
+      if (room.phase !== PHASES.BETTING || !room.pendingBets) return;
+      const seat = seatByIndex(room, pendingCpuSeat);
+      if (!seat || seat.type !== 'cpu') return;
+      const response = room.pendingBets.responses?.[String(pendingCpuSeat)];
+      if (response !== 'pending') return;
+
+      const amount = Math.max(1, Number(room.pendingBets.amount || room.baseBetAmount || 10));
+      const bankroll = Number(room.sessionBankroll?.[String(pendingCpuSeat)] || 0);
+      const level = Math.max(0, Math.min(4, Number(seat.cpuLevel || 1)));
+      let decision = 'called';
+      if (bankroll < amount) {
+        decision = 'folded';
+      } else {
+        const foldChanceByLevel = [0.42, 0.3, 0.2, 0.14, 0.08];
+        if (Math.random() < foldChanceByLevel[level]) {
+          decision = 'folded';
+        }
+      }
+
+      resolveBettingResponse(room, pendingCpuSeat, decision);
+      broadcastRoom(room);
+      broadcastTurnTimer(room);
+      scheduleCpuIfNeeded(room);
+    }, delay);
     return;
   }
 
@@ -1356,6 +1579,42 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
     return true;
   }
 
+  if (action === 'host:bettingEnable') {
+    if (!ensureHost(room, clientId, action)) return false;
+
+    const enabled = !!payload.enabled;
+    if (payload.baseBetAmount != null) {
+      room.baseBetAmount = Math.max(1, Math.min(500, Number(payload.baseBetAmount) || 10));
+    }
+    room.bettingEnabled = enabled;
+
+    if (!enabled) {
+      room.pendingBets = null;
+      if (room.bettingTimer) {
+        clearTimeout(room.bettingTimer);
+        room.bettingTimer = null;
+      }
+      if (room.phase === PHASES.BETTING) {
+        beginPlayingTricks(room);
+      }
+    }
+
+    broadcastRoom(room);
+    broadcastTurnTimer(room);
+    scheduleCpuIfNeeded(room);
+    return true;
+  }
+
+  if (action === 'host:setBetAmount') {
+    if (!ensureHost(room, clientId, action)) return false;
+    room.baseBetAmount = Math.max(1, Math.min(500, Number(payload.amount) || 10));
+    if (room.pendingBets) {
+      room.pendingBets.amount = room.baseBetAmount;
+    }
+    broadcastRoom(room);
+    return true;
+  }
+
   if (action === 'host:setEnvironment') {
     if (!ensureHost(room, clientId, action)) return false;
     const environmentId = normalizeEnvironmentId(payload.environmentId);
@@ -1372,6 +1631,34 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
       environmentId
     });
     broadcastRoom(room);
+    return true;
+  }
+
+  if (action === 'betting:respond') {
+    if (room.phase !== PHASES.BETTING) return reject('betting:respond is only valid during betting.');
+
+    const seatIndex = Number.isInteger(forcedSeat)
+      ? forcedSeat
+      : humanSeatForClient(room, clientId)?.seatIndex;
+    if (!Number.isInteger(seatIndex)) {
+      return reject('No controllable seat for betting response.');
+    }
+    if (!canControlSeat(room, seatIndex, clientId, internal)) {
+      return reject('You cannot control this seat for betting.');
+    }
+    if (!Array.isArray(room.activeSeats) || !room.activeSeats.includes(seatIndex)) {
+      return reject('Seat is not active this hand.');
+    }
+
+    const decision = payload?.decision === 'called' ? 'called' : 'folded';
+    const applied = resolveBettingResponse(room, seatIndex, decision);
+    if (!applied) {
+      return reject('Betting response rejected.');
+    }
+
+    broadcastRoom(room);
+    broadcastTurnTimer(room);
+    scheduleCpuIfNeeded(room);
     return true;
   }
 
