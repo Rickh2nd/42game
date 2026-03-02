@@ -40,6 +40,7 @@ const AVATAR_STORAGE_KEY = 'avatarId';
 const PLAYER_NAME_STORAGE_KEY = 'playerName';
 const VIEW_STORAGE_KEY = 'texas42_view_settings_v1';
 const SCENE_TUNING_STORAGE_KEY = 'texas42_scene_tuning_v1';
+const AVATAR_Y_OFFSETS_STORAGE_KEY = 'texas42_avatar_y_offsets_v1';
 const CHAIRS_VISIBLE_STORAGE_KEY = 'texas42_chairs_visible_v1';
 const BURN_PANEL_OPACITY_STORAGE_KEY = 'texas42_burn_panel_opacity_v1';
 const TABLE_HUD_STORAGE_KEY = 'texas42_table_hud_v1';
@@ -199,6 +200,12 @@ const sceneTuneInputs = {
   chairY: document.getElementById('tune_chair_y'),
   tableY: document.getElementById('tune_table_y')
 };
+const seatAvatarYOffsetInputs = [
+  document.getElementById('tune_seat0_avatar_y'),
+  document.getElementById('tune_seat1_avatar_y'),
+  document.getElementById('tune_seat2_avatar_y'),
+  document.getElementById('tune_seat3_avatar_y')
+];
 
 const sceneTuneLabels = {
   tableScale: document.getElementById('tune_table_scale_val'),
@@ -210,6 +217,12 @@ const sceneTuneLabels = {
   chairY: document.getElementById('tune_chair_y_val'),
   tableY: document.getElementById('tune_table_y_val')
 };
+const seatAvatarYOffsetLabels = [
+  document.getElementById('tune_seat0_avatar_y_val'),
+  document.getElementById('tune_seat1_avatar_y_val'),
+  document.getElementById('tune_seat2_avatar_y_val'),
+  document.getElementById('tune_seat3_avatar_y_val')
+];
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -424,6 +437,7 @@ const DEFAULT_SCENE_TUNING = {
 };
 
 const sceneTuning = { ...DEFAULT_SCENE_TUNING };
+const avatarSeatYOffsets = [0, 0, 0, 0];
 const DEFAULT_BURN_PANEL_OPACITY = 0.55;
 let burnPanelOpacity = DEFAULT_BURN_PANEL_OPACITY;
 const DEFAULT_TABLE_HUD_SETTINGS = {
@@ -714,6 +728,38 @@ function persistSceneTuning() {
     chairY: Number(sceneTuning.chairY),
     tableY: Number(sceneTuning.tableY)
   }));
+}
+
+function sanitizeAvatarSeatOffsets() {
+  for (let i = 0; i < avatarSeatYOffsets.length; i += 1) {
+    avatarSeatYOffsets[i] = clampValue(Number(avatarSeatYOffsets[i]), -5, 5, 0);
+  }
+}
+
+function loadStoredAvatarSeatOffsets() {
+  try {
+    const raw = localStorage.getItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
+    if (!raw) {
+      sanitizeAvatarSeatOffsets();
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      sanitizeAvatarSeatOffsets();
+      return;
+    }
+    for (let i = 0; i < 4; i += 1) {
+      avatarSeatYOffsets[i] = Number(parsed[i] ?? avatarSeatYOffsets[i]);
+    }
+  } catch {
+    // ignore invalid payload
+  }
+  sanitizeAvatarSeatOffsets();
+}
+
+function persistAvatarSeatOffsets() {
+  sanitizeAvatarSeatOffsets();
+  localStorage.setItem(AVATAR_Y_OFFSETS_STORAGE_KEY, JSON.stringify(avatarSeatYOffsets));
 }
 
 function loadStoredChairVisibility() {
@@ -2950,6 +2996,7 @@ function updateSeatTransforms() {
     const avatarGroup = avatarSeatGroups[seatIndex];
     avatarGroup.scale.setScalar(sceneTuning.avatarScale);
     const avatarRadius = Math.max(0.4, sceneTuning.seatRadius - 0.18 + sceneTuning.avatarBack);
+    const perSeatYOffset = Number(avatarSeatYOffsets?.[seatIndex] || 0);
     let avatarBaseY = (
       seatConfig.avatar.pos[1]
       + sceneTuning.chairY
@@ -2959,8 +3006,9 @@ function updateSeatTransforms() {
     );
     avatarBaseY = Math.min(avatarBaseY, tableMetrics.topY - 0.28);
     avatarBaseY = clampAvatarBaseY(avatarBaseY, seatIndex);
+    avatarBaseY += perSeatYOffset;
     avatarGroup.position.set(seatDir.x * avatarRadius, avatarBaseY, seatDir.z * avatarRadius);
-    if (avatarBaseY >= tableMetrics.topY - 0.11) {
+    if (perSeatYOffset === 0 && avatarBaseY >= tableMetrics.topY - 0.11) {
       avatarGroup.position.x *= 1.18;
       avatarGroup.position.z *= 1.18;
       avatarGroup.position.y = tableMetrics.topY - 0.18;
@@ -3039,12 +3087,20 @@ function sanitizeSceneTuning() {
 
 function updateSceneTuningUi() {
   sanitizeSceneTuning();
+  sanitizeAvatarSeatOffsets();
   for (const key of Object.keys(sceneTuneInputs)) {
     const input = sceneTuneInputs[key];
     const label = sceneTuneLabels[key];
     if (!input || !label) continue;
     input.value = `${sceneTuning[key]}`;
     label.textContent = sceneTuning[key].toFixed(2);
+  }
+  for (let i = 0; i < seatAvatarYOffsetInputs.length; i += 1) {
+    const input = seatAvatarYOffsetInputs[i];
+    const label = seatAvatarYOffsetLabels[i];
+    if (!input || !label) continue;
+    input.value = `${avatarSeatYOffsets[i]}`;
+    label.textContent = avatarSeatYOffsets[i].toFixed(2);
   }
   if (chairsVisibleToggle) {
     chairsVisibleToggle.checked = chairsVisible;
@@ -3053,6 +3109,7 @@ function updateSceneTuningUi() {
 
 function applySceneTuning({ rerenderHand = true } = {}) {
   sanitizeSceneTuning();
+  sanitizeAvatarSeatOffsets();
   chairsRoot.visible = !!chairsVisible;
 
   const tableNode = environmentGroup.getObjectByName('tableModel');
@@ -3332,11 +3389,41 @@ function makeCandle(x, z, colorHex) {
   return g;
 }
 
+function normalizeAssetUrlPath(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+  if (!raw) return '';
+  const hasLeadingSlash = raw.startsWith('/');
+  const parts = raw.split('/').filter(Boolean);
+  const normalized = [];
+  for (const part of parts) {
+    if (part === '.') continue;
+    if (part === '..') {
+      if (normalized.length) normalized.pop();
+      continue;
+    }
+    normalized.push(part);
+  }
+  const joined = normalized.join('/');
+  if (!joined) {
+    return hasLeadingSlash ? '/' : '';
+  }
+  return hasLeadingSlash ? `/${joined}` : joined;
+}
+
 function environmentRootFor(entry) {
   if (entry?.root && typeof entry.root === 'string') {
-    return entry.root.replace(/\/$/, '');
+    const normalized = normalizeAssetUrlPath(entry.root);
+    const envId = String(entry?.id || '').trim();
+    if (!normalized) {
+      return normalizeAssetUrlPath(`/assets/environments/${envId || 'casino_lounge'}`);
+    }
+    if (envId && normalized === '/assets/environments') {
+      return normalizeAssetUrlPath(`/assets/environments/${envId}`);
+    }
+    return normalized;
   }
-  return `/assets/environments/${entry?.id || 'casino_lounge'}`;
+  return normalizeAssetUrlPath(`/assets/environments/${entry?.id || 'casino_lounge'}`);
 }
 
 async function fetchEnvironmentFiles(entry) {
@@ -3479,6 +3566,103 @@ async function loadEnvironmentHdri(url) {
   return task;
 }
 
+const ENV_TEX_EXTS = ['png', 'jpg', 'jpeg'];
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findCatalogTexture(catalog, dirPath, fileBase) {
+  if (!Array.isArray(catalog) || !catalog.length) return '';
+  const safeDir = String(dirPath || '').replace(/^\/+|\/+$/g, '');
+  const safeBase = String(fileBase || '').trim();
+  if (!safeDir || !safeBase) return '';
+  const matcher = new RegExp(`/${escapeRegExp(safeDir)}/${escapeRegExp(safeBase)}\\.(png|jpg|jpeg)$`, 'i');
+  for (const entry of catalog) {
+    if (typeof entry !== 'string') continue;
+    if (matcher.test(entry)) return entry;
+  }
+  return '';
+}
+
+async function loadExpectedMapTexture(envRoot, dirPath, fileBase, options = {}, catalog = []) {
+  const fromCatalog = findCatalogTexture(catalog, dirPath, fileBase);
+  if (fromCatalog) {
+    const tex = await loadEnvironmentTexture(fromCatalog, options);
+    if (tex) return tex;
+  }
+
+  const baseDir = normalizeAssetUrlPath(`${envRoot}/${dirPath}`);
+  const candidateBases = [...new Set([
+    String(fileBase || ''),
+    String(fileBase || '').toLowerCase(),
+    String(fileBase || '').charAt(0).toLowerCase() + String(fileBase || '').slice(1),
+    String(fileBase || '').charAt(0).toUpperCase() + String(fileBase || '').slice(1)
+  ].filter(Boolean))];
+
+  for (const baseName of candidateBases) {
+    for (const ext of ENV_TEX_EXTS) {
+      const url = `${baseDir}/${baseName}.${ext}`;
+      const tex = await loadEnvironmentTexture(url, options);
+      if (tex) return tex;
+    }
+  }
+  return null;
+}
+
+async function loadExpectedMaterialSet(envRoot, dirCandidates, repeat, kind, catalog = []) {
+  let selectedDir = dirCandidates[0];
+  let base = null;
+  for (const dir of dirCandidates) {
+    const candidate = await loadExpectedMapTexture(envRoot, dir, 'baseColor', { srgb: true, repeat }, catalog);
+    if (candidate) {
+      selectedDir = dir;
+      base = candidate;
+      break;
+    }
+  }
+
+  const searchDirs = [selectedDir, ...dirCandidates.filter((dir) => dir !== selectedDir)];
+  let normal = null;
+  let roughness = null;
+  for (const dir of searchDirs) {
+    if (!normal) {
+      normal = await loadExpectedMapTexture(envRoot, dir, 'normal', { srgb: false, repeat }, catalog);
+    }
+    if (!roughness) {
+      roughness = await loadExpectedMapTexture(envRoot, dir, 'roughness', { srgb: false, repeat }, catalog);
+    }
+    if (normal && roughness) break;
+  }
+
+  if (!base) {
+    warnOnce(`env:${kind}:baseMissing:${envRoot}`, `[env] ${kind} baseColor map missing at ${envRoot}`);
+  }
+  return { base, normal, roughness, selectedDir };
+}
+
+async function chooseEnvironmentHdri(envRoot, environmentId, catalog) {
+  const candidates = [];
+  if (environmentId === 'casino_lounge') {
+    candidates.push(
+      `${envRoot}/hdri/anniversary_lounge_4k.hdr`,
+      `${envRoot}/hdri/wooden_lounge_4k.hdr`
+    );
+  }
+  for (const file of catalog || []) {
+    const low = String(file).toLowerCase();
+    if (low.includes('/hdri/') && low.endsWith('.hdr')) {
+      candidates.push(file);
+    }
+  }
+  const unique = [...new Set(candidates.map((item) => normalizeAssetUrlPath(item)).filter(Boolean))];
+  for (const url of unique) {
+    const tex = await loadEnvironmentHdri(url);
+    if (tex) return tex;
+  }
+  return null;
+}
+
 function addCasinoTrim(roomRoot, roomWidth, roomDepth, wallHeight, material) {
   const trimHeight = 0.16;
   const trimDepth = 0.06;
@@ -3568,62 +3752,50 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   addCasinoTrim(roomRoot, roomWidth, roomDepth, wallHeight, trimMaterial);
   themeGroup.add(roomRoot);
 
-  const catalog = await fetchEnvironmentFiles(entry);
-  if (token !== environmentApplyToken) return;
-  const mapped = mapRoomAssets(catalog, environmentId);
-  const missing = [];
-  if (!mapped.floor.base) missing.push('missing floor texture');
-  if (!mapped.walls.base) missing.push('missing wall texture');
-  if (!mapped.trim.base) missing.push('missing trim texture');
-  if (!mapped.hdri) missing.push('missing HDR');
-
   const floorRepeat = environmentId === 'casino_lounge' ? [12, 14] : [8, 10];
   const wallRepeat = [4, 3];
   const trimRepeat = [7, 2];
-
-  const [floorBase, floorNormal, floorRough, wallBase, wallNormal, wallRough, trimBase, trimNormal, trimRough] = await Promise.all([
-    loadEnvironmentTexture(mapped.floor.base, { srgb: true, repeat: floorRepeat }),
-    loadEnvironmentTexture(mapped.floor.normal, { srgb: false, repeat: floorRepeat }),
-    loadEnvironmentTexture(mapped.floor.roughness, { srgb: false, repeat: floorRepeat }),
-    loadEnvironmentTexture(mapped.walls.base, { srgb: true, repeat: wallRepeat }),
-    loadEnvironmentTexture(mapped.walls.normal, { srgb: false, repeat: wallRepeat }),
-    loadEnvironmentTexture(mapped.walls.roughness, { srgb: false, repeat: wallRepeat }),
-    loadEnvironmentTexture(mapped.trim.base, { srgb: true, repeat: trimRepeat }),
-    loadEnvironmentTexture(mapped.trim.normal, { srgb: false, repeat: trimRepeat }),
-    loadEnvironmentTexture(mapped.trim.roughness, { srgb: false, repeat: trimRepeat })
+  const envRoot = environmentRootFor(entry);
+  const floorDirCandidates = environmentId === 'casino_lounge'
+    ? ['materials/carpet', 'materials/floor']
+    : ['materials/floor'];
+  const wallDirCandidates = ['materials/walls'];
+  const trimDirCandidates = ['materials/trim'];
+  const catalog = await fetchEnvironmentFiles(entry);
+  if (token !== environmentApplyToken) return;
+  const [floorSet, wallSet, trimSet] = await Promise.all([
+    loadExpectedMaterialSet(envRoot, floorDirCandidates, floorRepeat, 'floor', catalog),
+    loadExpectedMaterialSet(envRoot, wallDirCandidates, wallRepeat, 'walls', catalog),
+    loadExpectedMaterialSet(envRoot, trimDirCandidates, trimRepeat, 'trim', catalog)
   ]);
-
   if (token !== environmentApplyToken) return;
 
-  if (floorBase) floorMaterial.map = floorBase;
-  else missing.push('floor map load failed');
-  if (floorNormal) floorMaterial.normalMap = floorNormal;
-  if (floorRough) floorMaterial.roughnessMap = floorRough;
+  if (floorSet.base) floorMaterial.map = floorSet.base;
+  if (floorSet.normal) floorMaterial.normalMap = floorSet.normal;
+  if (floorSet.roughness) floorMaterial.roughnessMap = floorSet.roughness;
   floorMaterial.needsUpdate = true;
 
-  if (wallBase) wallMaterial.map = wallBase;
-  else missing.push('wall map load failed');
-  if (wallNormal) wallMaterial.normalMap = wallNormal;
-  if (wallRough) wallMaterial.roughnessMap = wallRough;
+  if (wallSet.base) wallMaterial.map = wallSet.base;
+  if (wallSet.normal) wallMaterial.normalMap = wallSet.normal;
+  if (wallSet.roughness) wallMaterial.roughnessMap = wallSet.roughness;
   wallMaterial.needsUpdate = true;
 
-  if (trimBase) trimMaterial.map = trimBase;
-  else missing.push('trim map load failed');
-  if (trimNormal) trimMaterial.normalMap = trimNormal;
-  if (trimRough) trimMaterial.roughnessMap = trimRough;
+  if (trimSet.base) trimMaterial.map = trimSet.base;
+  if (trimSet.normal) trimMaterial.normalMap = trimSet.normal;
+  if (trimSet.roughness) trimMaterial.roughnessMap = trimSet.roughness;
   trimMaterial.needsUpdate = true;
 
-  if (mapped.hdri) {
-    const hdriTex = await loadEnvironmentHdri(mapped.hdri);
-    if (token !== environmentApplyToken) return;
-    if (hdriTex) {
-      scene.environment = hdriTex;
-    } else {
-      missing.push('HDR load failed');
-    }
+  const hdriTex = await chooseEnvironmentHdri(envRoot, environmentId, catalog);
+  if (token !== environmentApplyToken) return;
+  if (hdriTex) {
+    scene.environment = hdriTex;
   }
 
-  if (mapped.props.length) {
+  const propCandidates = (catalog || []).filter((file) => {
+    const low = String(file).toLowerCase();
+    return low.includes('/props/') && (low.endsWith('.glb') || low.endsWith('.gltf') || low.endsWith('.obj'));
+  });
+  if (propCandidates.length) {
     const propSlots = [
       { pos: [-6.6, 0, -8.6], rotY: Math.PI * 0.2, scale: 0.9 },
       { pos: [6.5, 0, -8.9], rotY: -Math.PI * 0.18, scale: 0.9 },
@@ -3631,7 +3803,7 @@ async function buildRoomEnvironment(entry, token, environmentId) {
       { pos: [6.6, 0, -2.8], rotY: -Math.PI * 0.45, scale: 0.85 }
     ];
 
-    const propUrls = mapped.props.slice(0, propSlots.length);
+    const propUrls = propCandidates.slice(0, propSlots.length);
     for (let i = 0; i < propUrls.length; i += 1) {
       const url = propUrls[i];
       try {
@@ -3650,7 +3822,7 @@ async function buildRoomEnvironment(entry, token, environmentId) {
     }
   } else {
     const frameMaterial = new THREE.MeshStandardMaterial({
-      map: trimBase || woodTexture,
+      map: trimSet.base || woodTexture,
       color: 0xffffff,
       roughness: 0.62,
       metalness: 0.02
@@ -3678,10 +3850,14 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   }
 
   if (token !== environmentApplyToken) return;
-  const dedupedMissing = [...new Set(missing)];
-  if (dedupedMissing.length) {
-    console.warn(`[env] ${environmentId} fallback assets:`, dedupedMissing.join(', '));
-    setEnvironmentLoadStatus('fallback', dedupedMissing.join(', '));
+  const missingBaseMaps = [];
+  if (!floorSet.base) missingBaseMaps.push('floor');
+  if (!wallSet.base) missingBaseMaps.push('walls');
+  if (!trimSet.base) missingBaseMaps.push('trim');
+  if (missingBaseMaps.length >= 3) {
+    setEnvironmentLoadStatus('fallback', 'using procedural room materials');
+  } else if (missingBaseMaps.length > 0) {
+    setEnvironmentLoadStatus('fallback', `partial texture fallback: ${missingBaseMaps.join(', ')}`);
   } else {
     setEnvironmentLoadStatus('ok');
   }
@@ -4197,11 +4373,28 @@ function setupSceneTuningControls() {
     bindSlider(key);
   }
 
+  for (let i = 0; i < seatAvatarYOffsetInputs.length; i += 1) {
+    const input = seatAvatarYOffsetInputs[i];
+    if (!input) continue;
+    input.addEventListener('input', () => {
+      avatarSeatYOffsets[i] = Number(input.value);
+      sanitizeAvatarSeatOffsets();
+      updateSceneTuningUi();
+      persistAvatarSeatOffsets();
+      applySceneTuning({ rerenderHand: true });
+    });
+  }
+
   resetSceneTuningBtn?.addEventListener('click', () => {
     localStorage.removeItem(SCENE_TUNING_STORAGE_KEY);
+    localStorage.removeItem(AVATAR_Y_OFFSETS_STORAGE_KEY);
     Object.assign(sceneTuning, DEFAULT_SCENE_TUNING);
+    for (let i = 0; i < avatarSeatYOffsets.length; i += 1) {
+      avatarSeatYOffsets[i] = 0;
+    }
     updateSceneTuningUi();
     persistSceneTuning();
+    persistAvatarSeatOffsets();
     applySceneTuning({ rerenderHand: true });
     logMessage('Scene tuning reset.');
   });
@@ -4215,7 +4408,8 @@ function setupSceneTuningControls() {
       avatarBack: Number(sceneTuning.avatarBack),
       avatarY: Number(sceneTuning.avatarY),
       chairY: Number(sceneTuning.chairY),
-      tableY: Number(sceneTuning.tableY)
+      tableY: Number(sceneTuning.tableY),
+      seatAvatarYOffset: avatarSeatYOffsets.map((value) => Number(value))
     }, null, 2);
     try {
       await navigator.clipboard.writeText(payload);
@@ -5475,6 +5669,7 @@ runBootStep('connect', connect);
 
 runBootStep('loadStoredViewSettings', loadStoredViewSettings);
 runBootStep('loadStoredSceneTuning', loadStoredSceneTuning);
+runBootStep('loadStoredAvatarSeatOffsets', loadStoredAvatarSeatOffsets);
 runBootStep('loadStoredChairVisibility', loadStoredChairVisibility);
 runBootStep('loadStoredBurnPanelOpacity', loadStoredBurnPanelOpacity);
 runBootStep('loadStoredTableHudSettings', loadStoredTableHudSettings);

@@ -778,6 +778,21 @@ function ensureSessionBankroll(room) {
   }
 }
 
+function resetForNewHandCaptureOnly(room) {
+  room.trick = [];
+  room.trickHistory = [];
+  room.played = [];
+  room.pointsThisHand = { teamA: 0, teamB: 0 };
+  room.trickWinsThisHand = { teamA: 0, teamB: 0 };
+  room.countPointsThisHand = { teamA: 0, teamB: 0 };
+  room.burnPiles = { teamA: [], teamB: [] };
+  room.burnHandsTeamA = [];
+  room.burnHandsTeamB = [];
+  room.lastBurnContributor = { teamA: 0, teamB: 1 };
+  room.sevensState = null;
+  room.sevensResult = null;
+}
+
 function resetForNewHand(room) {
   room.phase = PHASES.BIDDING;
   room.bidderSeat = null;
@@ -786,20 +801,9 @@ function resetForNewHand(room) {
   room.trumpSuit = null;
   room.contract = null;
   room.bidHistory = [];
-  room.trick = [];
-  room.trickHistory = [];
-  room.played = [];
-  room.pointsThisHand = { teamA: 0, teamB: 0 };
-  room.trickWinsThisHand = { teamA: 0, teamB: 0 };
-  room.countPointsThisHand = { teamA: 0, teamB: 0 };
+  resetForNewHandCaptureOnly(room);
   room.targetThisHand = { teamA: 0, teamB: 0 };
-  room.burnPiles = { teamA: [], teamB: [] };
-  room.burnHandsTeamA = [];
-  room.burnHandsTeamB = [];
-  room.lastBurnContributor = { teamA: 0, teamB: 1 };
   room.activeSeats = [0, 1, 2, 3];
-  room.sevensState = null;
-  room.sevensResult = null;
   room.lastHandOutcome = null;
   room.timeoutPenalty = null;
   room.pendingBets = null;
@@ -1123,6 +1127,7 @@ function finishHand(room) {
     ...outcome,
     at: Date.now()
   };
+  resetForNewHandCaptureOnly(room);
   room.phase = PHASES.HAND_OVER;
   syncTurnTimerForState(room, { newTurn: true });
 

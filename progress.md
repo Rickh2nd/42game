@@ -385,3 +385,49 @@ Outstanding visual/manual TODO:
 - Playwright step attempted per develop-web-game skill:
   - `node "$WEB_GAME_CLIENT" ...`
   - blocked with `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright'` in this environment.
+
+Update (burn clear + env loader + per-seat avatar Y + betting popup reliability):
+- Server hand-end capture reset added:
+  - New `resetForNewHandCaptureOnly(room)` in `/server/server.js`.
+  - Called in `finishHand(room)` immediately after outcome resolution so burn/capture state clears before next hand begins.
+  - Clears: trick/trickHistory/played, burn piles, burn hand history stacks, trickWins/countPoints/points for this hand, and sevens per-hand state.
+  - Keeps session-level marks/bankroll/champion tracking intact.
+- `resetForNewHand(room)` now reuses `resetForNewHandCaptureOnly(room)` to keep capture reset behavior consistent.
+
+- Environment loader hardened in `/client/main.js`:
+  - Added URL normalization (`normalizeAssetUrlPath`) and safer `environmentRootFor(entry)` handling.
+  - Added deterministic material map discovery for expected files:
+    - `baseColor.(png|jpg|jpeg)`
+    - `normal.(png|jpg|jpeg)`
+    - `roughness.(png|jpg|jpeg)`
+  - Added catalog-aware texture pick + extension fallback and case-insensitive matching.
+  - Casino floor logic keeps `materials/carpet` preferred, then `materials/floor`.
+  - HDR selection stays optional and non-crashing.
+
+- Per-seat avatar Y tuning (huge range) completed:
+  - Added sliders in `/client/index.html`: `tune_seat0_avatar_y..tune_seat3_avatar_y` with `-5.00..5.00`.
+  - Added persistence key `texas42_avatar_y_offsets_v1` in `/client/main.js`.
+  - Applied offsets at seat transform level only (avatar slot), without modifying table/chair roots.
+
+- Betting popup reliability:
+  - Existing betting modal flow retained and validated against snapshot/event paths (`betting:open` / `betting:close`).
+  - Modal remains popup-based with drag offsets persisted.
+
+Asset additions for envs (to ensure all 5 room themes load maps immediately):
+- Added generated map triplets (`baseColor.png`, `normal.png`, `roughness.png`) for:
+  - `casino_lounge/materials/{carpet,walls,trim}`
+  - `modern_suite/materials/{floor,walls,trim}`
+  - `neon_arcade/materials/{floor,walls,trim}`
+  - `rustic_tavern/materials/{floor,walls,trim}`
+  - `spooky_parlor/materials/{floor,walls,trim}`
+
+Validation run:
+- `node --check client/main.js` ✅
+- `node --check server/server.js` ✅
+- Local smoke:
+  - `/health` returns JSON ✅
+  - `/api/environment-files/{modern_suite,neon_arcade,rustic_tavern,spooky_parlor,casino_lounge}` return non-zero file counts ✅
+- Playwright skill client unavailable in this environment because `playwright` package is not installed (same blocker as prior pass).
+
+TODO (next pass if needed):
+- Run headed browser check for env switching visuals and burn panel instant-clear UX timing in a live hand.
