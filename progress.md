@@ -196,3 +196,26 @@ Validation this pass:
   - `/health` OK
   - `/api/environment-files/casino_lounge` OK
   - socket.io polling handshake OK
+
+Update (played-trick row + pip spacing + burn live capture + opacity tuning pass):
+- Played domino trick layout now renders in local POV as a portrait row, strictly left-to-right in trick play order (`trick[0]` leftmost).
+- Expanded played domino clamp in client view settings to support larger table scale (`tableDominoScale` max 25.0), with live re-render.
+- Updated domino pip layout to modern wider 2x3 half-grid spacing (less crowded) and adjusted pip radius/shading to keep realism.
+- Burn panels now include immediate live trick captures from `roomState.burnPiles` (split into vertical live trick rows) while keeping completed-hand history stacks.
+- Burn panel stats now include both live captured tiles and completed hand-history totals.
+- Added burn panel opacity control wiring:
+  - New storage key `texas42_burn_panel_opacity_v1`
+  - CSS variable `--burnPanelBgAlpha` updated live
+  - slider persistence + restore on boot.
+
+Validation:
+- `node --check client/main.js` pass
+- `node --check server/server.js` pass
+- Local API/socket smoke:
+  - `curl http://localhost:3000/health` => JSON ok
+  - `curl /socket.io polling` => Engine.IO handshake payload
+  - node socket client `debug:ping` ack => pass
+- Playwright automation client attempted per skill workflow but blocked because `playwright` package is not installed in this environment.
+
+Remaining caution:
+- Visual tuning still depends on in-browser review for final subjective spacing/anchor tweaks.

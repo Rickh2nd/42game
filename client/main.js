@@ -40,6 +40,7 @@ const PLAYER_NAME_STORAGE_KEY = 'playerName';
 const VIEW_STORAGE_KEY = 'texas42_view_settings_v1';
 const SCENE_TUNING_STORAGE_KEY = 'texas42_scene_tuning_v1';
 const CHAIRS_VISIBLE_STORAGE_KEY = 'texas42_chairs_visible_v1';
+const BURN_PANEL_OPACITY_STORAGE_KEY = 'texas42_burn_panel_opacity_v1';
 const PLAYER_ID_STORAGE_KEY = 'texas42_player_id';
 const CLIENT_VERSION = '1.0.0';
 
@@ -71,6 +72,8 @@ const environmentSelect = document.getElementById('environmentSelect');
 const environmentPreview = document.getElementById('environmentPreview');
 const environmentStateText = document.getElementById('environmentStateText');
 const environmentLoadText = document.getElementById('environmentLoadText');
+const burnPanelOpacityInput = document.getElementById('burn_panel_opacity');
+const burnPanelOpacityValue = document.getElementById('burn_panel_opacity_val');
 const emojiOverlays = document.getElementById('emojiOverlays');
 const networkStatusValue = document.getElementById('networkStatusValue');
 const networkUrlValue = document.getElementById('networkUrlValue');
@@ -392,6 +395,8 @@ const DEFAULT_SCENE_TUNING = {
 };
 
 const sceneTuning = { ...DEFAULT_SCENE_TUNING };
+const DEFAULT_BURN_PANEL_OPACITY = 0.55;
+let burnPanelOpacity = DEFAULT_BURN_PANEL_OPACITY;
 
 let localClientId = null;
 let roomState = null;
@@ -659,6 +664,33 @@ function loadStoredChairVisibility() {
 
 function persistChairVisibility() {
   localStorage.setItem(CHAIRS_VISIBLE_STORAGE_KEY, chairsVisible ? '1' : '0');
+}
+
+function sanitizeBurnPanelOpacity(value) {
+  return clampValue(value, 0.05, 0.95, DEFAULT_BURN_PANEL_OPACITY);
+}
+
+function applyBurnPanelOpacity(value, { persist = false } = {}) {
+  burnPanelOpacity = sanitizeBurnPanelOpacity(value);
+  document.documentElement.style.setProperty('--burnPanelBgAlpha', burnPanelOpacity.toFixed(2));
+  if (burnPanelOpacityInput) {
+    burnPanelOpacityInput.value = burnPanelOpacity.toFixed(2);
+  }
+  if (burnPanelOpacityValue) {
+    burnPanelOpacityValue.textContent = burnPanelOpacity.toFixed(2);
+  }
+  if (persist) {
+    localStorage.setItem(BURN_PANEL_OPACITY_STORAGE_KEY, burnPanelOpacity.toFixed(2));
+  }
+}
+
+function loadStoredBurnPanelOpacity() {
+  const raw = localStorage.getItem(BURN_PANEL_OPACITY_STORAGE_KEY);
+  if (raw == null) {
+    applyBurnPanelOpacity(DEFAULT_BURN_PANEL_OPACITY);
+    return;
+  }
+  applyBurnPanelOpacity(raw);
 }
 
 function formatTimerMs(ms) {
@@ -1368,24 +1400,24 @@ function updateMarksMenu() {
 function pipPositions(value) {
   return {
     0: [],
-    1: [[0, 0]],
-    2: [[-0.22, -0.22], [0.22, 0.22]],
-    3: [[-0.22, -0.22], [0, 0], [0.22, 0.22]],
-    4: [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]],
-    5: [[-0.22, -0.22], [0.22, -0.22], [0, 0], [-0.22, 0.22], [0.22, 0.22]],
-    6: [[-0.22, -0.27], [0.22, -0.27], [-0.22, 0], [0.22, 0], [-0.22, 0.27], [0.22, 0.27]]
+    1: [[0.5, 0.5]],
+    2: [[0.3, 0.22], [0.7, 0.78]],
+    3: [[0.3, 0.22], [0.5, 0.5], [0.7, 0.78]],
+    4: [[0.3, 0.22], [0.7, 0.22], [0.3, 0.78], [0.7, 0.78]],
+    5: [[0.3, 0.22], [0.7, 0.22], [0.5, 0.5], [0.3, 0.78], [0.7, 0.78]],
+    6: [[0.3, 0.22], [0.3, 0.5], [0.3, 0.78], [0.7, 0.22], [0.7, 0.5], [0.7, 0.78]]
   }[value] || [];
 }
 
 function drawPipSetInCell(ctx, value, cell, color) {
   const positions = pipPositions(value);
-  const pipRadius = Math.max(2.7, Math.min(cell.w, cell.h) * 0.08);
-  const spreadX = cell.w * 0.42;
-  const spreadY = cell.h * 0.42;
+  const pipRadius = Math.max(2.4, Math.min(cell.w, cell.h) * 0.072);
+  const left = cell.cx - (cell.w * 0.5);
+  const top = cell.cy - (cell.h * 0.5);
 
-  for (const [ox, oy] of positions) {
-    const px = cell.cx + (ox * spreadX);
-    const py = cell.cy + (oy * spreadY);
+  for (const [nx, ny] of positions) {
+    const px = left + (nx * cell.w);
+    const py = top + (ny * cell.h);
     ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
     ctx.beginPath();
     ctx.arc(px + 0.8, py + 1.0, pipRadius + 0.6, 0, Math.PI * 2);
@@ -1599,24 +1631,71 @@ function lastContributorForTeam(team, handRecord = null) {
   return contributorForSeat(seatIndex, team);
 }
 
+function splitTilesIntoLiveTrickRows(tiles) {
+  const list = Array.isArray(tiles) ? tiles : [];
+  const rows = [];
+  if (!list.length) return rows;
+  const totalTricks = Math.ceil(list.length / 4);
+  for (let rowIndex = 0; rowIndex < totalTricks; rowIndex += 1) {
+    const end = list.length - rowIndex * 4;
+    const start = Math.max(0, end - 4);
+    const chunk = list.slice(start, end);
+    rows.push({
+      label: `LIVE TRICK #${Math.ceil(end / 4)}`,
+      tiles: chunk,
+      countPoints: chunk.reduce((sum, tile) => sum + countTilePoints(tile), 0)
+    });
+  }
+  return rows;
+}
+
 function renderBurnPanel(team, data) {
   const panel = burnPanelDom[team];
   if (!panel || !panel.stack) return;
 
   const titleTeam = team === 'teamA' ? 'TEAM 1 BURN PILE' : 'TEAM 2 BURN PILE';
   const handRecords = Array.isArray(data.handRecords) ? data.handRecords : [];
-  const totalTiles = handRecords.reduce((sum, record) => sum + (record.tiles?.length || 0), 0);
-  const totalCountPoints = handRecords.reduce((sum, record) => sum + Number(record.countPoints || 0), 0);
+  const liveTiles = Array.isArray(data.liveTiles) ? data.liveTiles : [];
+  const liveRows = splitTilesIntoLiveTrickRows(liveTiles);
+  const totalTiles = liveTiles.length + handRecords.reduce((sum, record) => sum + (record.tiles?.length || 0), 0);
+  const totalCountPoints = liveTiles.reduce((sum, tile) => sum + countTilePoints(tile), 0)
+    + handRecords.reduce((sum, record) => sum + Number(record.countPoints || 0), 0);
   const handWins = Number(data.handWins || 0);
   panel.title.textContent = titleTeam;
   panel.stats.textContent = `Tiles: ${totalTiles} | Count pts: ${totalCountPoints} | Hand: ${handWins}`;
 
   panel.stack.replaceChildren();
-  if (!handRecords.length) {
+  if (!liveRows.length && !handRecords.length) {
     const empty = document.createElement('div');
     empty.className = 'burnHandRow';
     empty.innerHTML = '<div class="burnHandHeader"><span>No completed hands yet</span><span class="burnHandPts">+0 pts</span></div>';
     panel.stack.appendChild(empty);
+  }
+
+  for (const liveRow of liveRows) {
+    const row = document.createElement('div');
+    row.className = 'burnHandRow';
+
+    const header = document.createElement('div');
+    header.className = 'burnHandHeader';
+    const handLabel = document.createElement('span');
+    handLabel.textContent = liveRow.label;
+    const ptsLabel = document.createElement('span');
+    ptsLabel.className = 'burnHandPts';
+    ptsLabel.textContent = `+${Number(liveRow.countPoints || 0)} pts`;
+    header.append(handLabel, ptsLabel);
+
+    const tilesRow = document.createElement('div');
+    tilesRow.className = 'burnHandTilesRow';
+    for (const tile of liveRow.tiles) {
+      tilesRow.appendChild(buildBurnDominoTile(tile, {
+        highlightCount: countTilePoints(tile) > 0,
+        mode: data.mode,
+        trumpSuit: data.trumpSuit
+      }));
+    }
+    row.append(header, tilesRow);
+    panel.stack.appendChild(row);
   }
 
   if (handRecords.length) {
@@ -1656,7 +1735,7 @@ function renderBurnPanel(team, data) {
     }
   }
 
-  const contributor = lastContributorForTeam(team, handRecords[0]);
+  const contributor = lastContributorForTeam(team, liveRows.length ? null : handRecords[0]);
   panel.footer.innerHTML = `
     <div class="burnFooterName">${contributor.name}</div>
     <div class="burnFooterMeta">${contributor.meta}</div>
@@ -1665,18 +1744,21 @@ function renderBurnPanel(team, data) {
 
 function updateBurnPanels() {
   if (!roomState) {
-    renderBurnPanel('teamA', { handRecords: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
-    renderBurnPanel('teamB', { handRecords: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
+    renderBurnPanel('teamA', { liveTiles: [], handRecords: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
+    renderBurnPanel('teamB', { liveTiles: [], handRecords: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
     return;
   }
+  const showLiveHandCaptures = roomState.phase === PHASES.PLAYING || roomState.phase === PHASES.TRICK_PAUSE;
 
   renderBurnPanel('teamA', {
+    liveTiles: showLiveHandCaptures ? (roomState.burnPiles?.teamA || []) : [],
     handRecords: roomState.burnHandsTeamA || [],
     handWins: roomState.roundWins?.teamA || 0,
     mode: roomState.mode || MODES.TRUMPS,
     trumpSuit: roomState.trumpSuit
   });
   renderBurnPanel('teamB', {
+    liveTiles: showLiveHandCaptures ? (roomState.burnPiles?.teamB || []) : [],
     handRecords: roomState.burnHandsTeamB || [],
     handWins: roomState.roundWins?.teamB || 0,
     mode: roomState.mode || MODES.TRUMPS,
@@ -2272,7 +2354,7 @@ function sanitizeViewSettings() {
   viewSettings.handZ = clampValue(Number(viewSettings.handZ), -4.0, 4.0);
   viewSettings.handDominoScale = clampValue(Number(viewSettings.handDominoScale), 0.05, 12.0);
   viewSettings.handDominoRotDeg = clampValue(Number(viewSettings.handDominoRotDeg), -180, 180);
-  viewSettings.tableDominoScale = clampValue(Number(viewSettings.tableDominoScale), 0.05, 12.0);
+  viewSettings.tableDominoScale = clampValue(Number(viewSettings.tableDominoScale), 0.05, 25.0);
 }
 
 function updateViewControlsUi() {
@@ -3296,19 +3378,20 @@ function renderTableTrick(trick) {
   }
 
   const localSeat = getLocalSeat();
-  const radius = Math.max(0.22, Math.min(0.46, tableMetrics.radius * 0.11));
-  const tableScale = Math.max(0.05, Number(viewSettings.tableDominoScale) || 1);
-  const centerY = tableMetrics.topY + Math.max(0.007, DOMINO_TILE_THICKNESS * tableScale * 0.8);
+  const seatBasis = getSeatBasisForHandLayout(Number.isInteger(localSeat) ? localSeat : 0);
+  const tableScale = clampValue(Number(viewSettings.tableDominoScale), 0.05, 25.0, 1.0);
+  const centerY = tableMetrics.topY + Math.max(0.012, DOMINO_TILE_THICKNESS * Math.max(1, tableScale) + 0.004);
+  const forwardTowardPlayer = seatBasis.forward.clone().multiplyScalar(-1);
+  const anchor = new THREE.Vector3(0, centerY, 0).addScaledVector(forwardTowardPlayer, 0.15);
+  const rowRight = seatBasis.right.clone().normalize();
+  const dominoWidth = DOMINO_SHORT * tableScale;
+  const gap = clampValue(dominoWidth * 0.35, 0.01, 0.02, 0.012);
+  const spacing = Math.max(dominoWidth + gap, dominoWidth * 1.1);
+  const startX = -((plays.length - 1) * spacing) * 0.5;
+  const facingYaw = Math.atan2(seatBasis.forward.z, seatBasis.forward.x);
 
-  for (const play of plays) {
-    const rel = toRelativeSeat(play.seatIndex, localSeat);
-    const cross = [
-      { x: 0, z: radius },
-      { x: radius, z: 0 },
-      { x: 0, z: -radius },
-      { x: -radius, z: 0 }
-    ][rel] || { x: 0, z: 0 };
-
+  for (let i = 0; i < plays.length; i += 1) {
+    const play = plays[i];
     const mesh = createDominoTile(play.tile, {
       faceUp: true,
       glowCount: countTilePoints(play.tile) > 0,
@@ -3318,8 +3401,8 @@ function renderTableTrick(trick) {
       orientation: 'portrait',
       scale: tableScale
     });
-    mesh.position.set(cross.x, centerY, cross.z);
-    mesh.rotation.y = rel === 1 ? -Math.PI / 2 : rel === 3 ? Math.PI / 2 : rel === 2 ? Math.PI : 0;
+    mesh.position.copy(anchor).addScaledVector(rowRight, startX + i * spacing);
+    mesh.rotation.set(0, facingYaw, 0);
     mesh.userData.tableDomino = true;
     tablePlayRoot.add(mesh);
 
@@ -4329,6 +4412,10 @@ function ensureButtons() {
     sendAction('host:setEnvironment', { environmentId });
   });
 
+  burnPanelOpacityInput?.addEventListener('input', () => {
+    applyBurnPanelOpacity(burnPanelOpacityInput.value, { persist: true });
+  });
+
   reconnectNowBtn?.addEventListener('click', () => {
     socket.disconnect();
     socket.connect();
@@ -4662,6 +4749,7 @@ runBootStep('connect', connect);
 runBootStep('loadStoredViewSettings', loadStoredViewSettings);
 runBootStep('loadStoredSceneTuning', loadStoredSceneTuning);
 runBootStep('loadStoredChairVisibility', loadStoredChairVisibility);
+runBootStep('loadStoredBurnPanelOpacity', loadStoredBurnPanelOpacity);
 runBootStep('updateViewControlsUi', updateViewControlsUi);
 runBootStep('updateSceneTuningUi', updateSceneTuningUi);
 runBootStep('setupViewControls', setupViewControls);

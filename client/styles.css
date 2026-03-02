@@ -10,6 +10,7 @@
   --danger: #e2584f;
   --success: #56c47e;
   --chip: rgba(255, 255, 255, 0.08);
+  --burnPanelBgAlpha: 0.55;
 }
 
 * {
@@ -155,7 +156,7 @@ body,
     0 12px 28px rgba(0, 0, 0, 0.35);
   background:
     radial-gradient(120% 75% at 50% 4%, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0)),
-    linear-gradient(180deg, rgba(7, 11, 17, 0.78), rgba(6, 9, 13, 0.64));
+    linear-gradient(180deg, rgba(7, 11, 17, var(--burnPanelBgAlpha)), rgba(6, 9, 13, var(--burnPanelBgAlpha)));
   backdrop-filter: blur(6px);
   overflow: hidden;
 }
