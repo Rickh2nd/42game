@@ -28,6 +28,7 @@ const PHASES = {
 };
 
 const FLOOR_Y = 0;
+const AVATAR_GLOBAL_NUDGE_Y = 0.015;
 const PLAY_PLANE_Y = 0.6;
 const DOMINO_LONG = 0.056;
 const DOMINO_SHORT = 0.029;
@@ -47,6 +48,7 @@ const BURN_PANEL_OPACITY_STORAGE_KEY = 'texas42_burn_panel_opacity_v1';
 const TABLE_HUD_STORAGE_KEY = 'texas42_table_hud_v1';
 const BETTING_MODAL_STORAGE_KEY = 'texas42_bet_modal_pos_v1';
 const BETTING_MODAL_STORAGE_KEY_LEGACY = 'texas42_betting_modal_v1';
+const CHIP_WIDGET_STORAGE_KEY = 'texas42_chip_widget_pos_v1';
 const MUTE_STORAGE_KEY = 'texas42_mute_v1';
 const PLAYER_ID_STORAGE_KEY = 'texas42_player_id';
 const CLIENT_VERSION = '1.0.0';
@@ -70,6 +72,24 @@ const hudTrumpDragHandle = document.getElementById('hudTrumpDragHandle');
 const hudBidValue = document.getElementById('hudBidValue');
 const hudTrumpValue = document.getElementById('hudTrumpValue');
 const turnTimerHud = document.getElementById('turnTimerHud');
+const bidTray = document.getElementById('bidTray');
+const bidTrayTitle = document.getElementById('bidTrayTitle');
+const bidTrayTimer = document.getElementById('bidTrayTimer');
+const bidTrayStatus = document.getElementById('bidTrayStatus');
+const bidTrayButtons = document.getElementById('bidTrayButtons');
+const bidTrayPassBtn = document.getElementById('bidTrayPassBtn');
+const chipTray = document.getElementById('chipTray');
+const chipTrayTitle = document.getElementById('chipTrayTitle');
+const chipTrayBody = document.getElementById('chipTrayBody');
+const chipTrayPotText = document.getElementById('chipTrayPotText');
+const chipTrayButtons = document.getElementById('chipTrayButtons');
+const chipBidAmountInput = document.getElementById('chipBidAmountInput');
+const chipMinusBtn = document.getElementById('chipMinusBtn');
+const chipPlusBtn = document.getElementById('chipPlusBtn');
+const chipTotalsWidget = document.getElementById('chipTotalsWidget');
+const chipTotalsDragHandle = document.getElementById('chipTotalsDragHandle');
+const chipTotalsList = document.getElementById('chipTotalsList');
+const chipTotalsPot = document.getElementById('chipTotalsPot');
 const timerEnabledToggle = document.getElementById('timerEnabledToggle');
 const timerPauseBtn = document.getElementById('timerPauseBtn');
 const timerStateText = document.getElementById('timerStateText');
@@ -95,6 +115,7 @@ const environmentSelect = document.getElementById('environmentSelect');
 const environmentPreview = document.getElementById('environmentPreview');
 const environmentStateText = document.getElementById('environmentStateText');
 const environmentLoadText = document.getElementById('environmentLoadText');
+const decorLoadText = document.getElementById('decorLoadText');
 const burnPanelOpacityInput = document.getElementById('burn_panel_opacity');
 const burnPanelOpacityValue = document.getElementById('burn_panel_opacity_val');
 const emojiOverlays = document.getElementById('emojiOverlays');
@@ -119,6 +140,7 @@ const sectionMarks = document.getElementById('section-marks');
 const sectionView = document.getElementById('section-view');
 const sectionSceneTuning = document.getElementById('section-scene-tuning');
 const sectionBetting = document.getElementById('section-betting');
+const sectionLighting = document.getElementById('section-lighting');
 const sectionDebugTable = document.getElementById('section-debug-table');
 
 const bidButtonsWrap = document.getElementById('bidButtons');
@@ -135,12 +157,34 @@ const actionModalTitle = document.getElementById('actionModalTitle');
 const actionModalBody = document.getElementById('actionModalBody');
 const actionModalButtons = document.getElementById('actionModalButtons');
 const actionModalModeButtons = document.getElementById('actionModalModeButtons');
-const bettingModal = document.getElementById('betModal') || document.getElementById('bettingModal');
-const bettingModalTitle = document.getElementById('bettingModalTitle');
-const bettingModalBody = document.getElementById('bettingModalBody');
-const bettingModalPot = document.getElementById('bettingModalPot');
-const bettingModalButtons = document.getElementById('bettingModalButtons');
-const bettingModalDragHandle = document.getElementById('bettingModalDragHandle');
+const decorBoundsToggle = document.getElementById('decorBoundsToggle');
+const listLoadedPropsBtn = document.getElementById('listLoadedPropsBtn');
+const decorDebugList = document.getElementById('decorDebugList');
+
+const lightingInputs = {
+  keyIntensity: document.getElementById('light_key_intensity'),
+  fillIntensity: document.getElementById('light_fill_intensity'),
+  rimIntensity: document.getElementById('light_rim_intensity'),
+  ambientIntensity: document.getElementById('light_ambient_intensity'),
+  temperature: document.getElementById('light_temperature'),
+  hdriIntensity: document.getElementById('light_hdri_intensity'),
+  shadowDarkness: document.getElementById('light_shadow_darkness'),
+  fogDensity: document.getElementById('light_fog_density')
+};
+
+const lightingValueLabels = {
+  keyIntensity: document.getElementById('light_key_intensity_val'),
+  fillIntensity: document.getElementById('light_fill_intensity_val'),
+  rimIntensity: document.getElementById('light_rim_intensity_val'),
+  ambientIntensity: document.getElementById('light_ambient_intensity_val'),
+  temperature: document.getElementById('light_temperature_val'),
+  hdriIntensity: document.getElementById('light_hdri_intensity_val'),
+  shadowDarkness: document.getElementById('light_shadow_darkness_val'),
+  fogDensity: document.getElementById('light_fog_density_val')
+};
+const resetLightingBtn = document.getElementById('resetLightingBtn');
+const copyLightingBtn = document.getElementById('copyLightingBtn');
+const lightingStateText = document.getElementById('lightingStateText');
 
 const scoreTeamAMain = document.getElementById('score-teamA-main');
 const scoreTeamBMain = document.getElementById('score-teamB-main');
@@ -402,6 +446,8 @@ const tmpV3A = new THREE.Vector3();
 const tmpV3B = new THREE.Vector3();
 const tmpV3E = new THREE.Vector3();
 const tmpBox = new THREE.Box3();
+const tmpMeshBox = new THREE.Box3();
+const tmpGeoBox = new THREE.Box3();
 
 const avatarCatalog = [];
 const avatarById = new Map();
@@ -411,6 +457,18 @@ let currentEnvironmentId = null;
 let environmentApplyToken = 0;
 let environmentLoadState = 'idle';
 let environmentLoadDetail = '';
+const decorDebugState = {
+  props: [],
+  helpers: [],
+  sharedCatalog: null
+};
+let sharedPropCatalogLogged = false;
+let showDecorBounds = false;
+const envLightingStateById = new Map();
+let activeLightingState = null;
+let currentFogColor = '#1f1f1f';
+let currentFogNear = 22;
+let currentFogFar = 70;
 
 const timeoutPenaltyBySeat = new Map();
 const tempV3C = new THREE.Vector3();
@@ -479,11 +537,24 @@ const DEFAULT_TABLE_HUD_SETTINGS = {
   trumpOffsetY: 0
 };
 const tableHudSettings = { ...DEFAULT_TABLE_HUD_SETTINGS };
-const DEFAULT_BETTING_MODAL_SETTINGS = {
+const DEFAULT_CHIP_WIDGET_SETTINGS = {
   offsetX: 0,
   offsetY: 0
 };
-const bettingModalSettings = { ...DEFAULT_BETTING_MODAL_SETTINGS };
+const chipWidgetSettings = { ...DEFAULT_CHIP_WIDGET_SETTINGS };
+
+const LIGHTING_STORAGE_PREFIX = 'texas42_lighting_';
+const LIGHTING_STORAGE_SUFFIX = '_v1';
+const DEFAULT_LIGHTING = {
+  keyIntensity: 1.0,
+  fillIntensity: 0.3,
+  rimIntensity: 0.2,
+  ambientIntensity: 0.5,
+  temperature: 5200,
+  hdriIntensity: 1.0,
+  shadowDarkness: 0.35,
+  fogDensity: 0
+};
 
 let muted = false;
 let audioCtx = null;
@@ -499,11 +570,11 @@ let draggingHudBlock = null;
 let hudPointerId = null;
 let hudDragStart = { x: 0, y: 0 };
 let hudOffsetStart = { x: 0, y: 0 };
-let draggingBettingModal = false;
-let bettingModalPointerId = null;
-let bettingModalDragStart = { x: 0, y: 0 };
-let bettingModalOffsetStart = { x: 0, y: 0 };
-let bettingModalOpenHandId = null;
+let draggingChipWidget = false;
+let chipWidgetPointerId = null;
+let chipWidgetDragStart = { x: 0, y: 0 };
+let chipWidgetOffsetStart = { x: 0, y: 0 };
+let lastAvatarFloorClampTs = 0;
 
 let localClientId = null;
 let roomState = null;
@@ -1014,41 +1085,42 @@ function loadStoredTableHudSettings() {
   applyTableHudSettings();
 }
 
-function sanitizeBettingModalSettings() {
-  bettingModalSettings.offsetX = clampValue(Number(bettingModalSettings.offsetX), -1400, 1400, 0);
-  bettingModalSettings.offsetY = clampValue(Number(bettingModalSettings.offsetY), -900, 900, 0);
+function sanitizeChipWidgetSettings() {
+  chipWidgetSettings.offsetX = clampValue(Number(chipWidgetSettings.offsetX), -1400, 1400, 0);
+  chipWidgetSettings.offsetY = clampValue(Number(chipWidgetSettings.offsetY), -900, 900, 0);
 }
 
-function applyBettingModalSettings({ persist = false } = {}) {
-  sanitizeBettingModalSettings();
-  document.documentElement.style.setProperty('--bettingModalOffsetX', `${bettingModalSettings.offsetX.toFixed(1)}px`);
-  document.documentElement.style.setProperty('--bettingModalOffsetY', `${bettingModalSettings.offsetY.toFixed(1)}px`);
+function applyChipWidgetSettings({ persist = false } = {}) {
+  sanitizeChipWidgetSettings();
+  document.documentElement.style.setProperty('--chipWidgetOffsetX', `${chipWidgetSettings.offsetX.toFixed(1)}px`);
+  document.documentElement.style.setProperty('--chipWidgetOffsetY', `${chipWidgetSettings.offsetY.toFixed(1)}px`);
   if (persist) {
-    localStorage.setItem(BETTING_MODAL_STORAGE_KEY, JSON.stringify({
-      offsetX: Number(bettingModalSettings.offsetX),
-      offsetY: Number(bettingModalSettings.offsetY)
+    localStorage.setItem(CHIP_WIDGET_STORAGE_KEY, JSON.stringify({
+      offsetX: Number(chipWidgetSettings.offsetX),
+      offsetY: Number(chipWidgetSettings.offsetY)
     }));
   }
 }
 
-function loadStoredBettingModalSettings() {
+function loadStoredChipWidgetSettings() {
   try {
-    const raw = localStorage.getItem(BETTING_MODAL_STORAGE_KEY)
+    const raw = localStorage.getItem(CHIP_WIDGET_STORAGE_KEY)
+      || localStorage.getItem(BETTING_MODAL_STORAGE_KEY)
       || localStorage.getItem(BETTING_MODAL_STORAGE_KEY_LEGACY);
     if (!raw) {
-      applyBettingModalSettings();
+      applyChipWidgetSettings();
       return;
     }
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
-      bettingModalSettings.offsetX = Number(parsed.offsetX ?? bettingModalSettings.offsetX);
-      bettingModalSettings.offsetY = Number(parsed.offsetY ?? bettingModalSettings.offsetY);
+      chipWidgetSettings.offsetX = Number(parsed.offsetX ?? chipWidgetSettings.offsetX);
+      chipWidgetSettings.offsetY = Number(parsed.offsetY ?? chipWidgetSettings.offsetY);
     }
   } catch {
     // ignore invalid payload
   }
   localStorage.removeItem(BETTING_MODAL_STORAGE_KEY_LEGACY);
-  applyBettingModalSettings();
+  applyChipWidgetSettings();
 }
 
 function setMuted(value, { persist = false } = {}) {
@@ -1378,6 +1450,185 @@ const ENV_THEME_PRESETS = {
   }
 };
 
+function lightingStorageKey(envId) {
+  return `${LIGHTING_STORAGE_PREFIX}${String(envId || 'casino_lounge')}${LIGHTING_STORAGE_SUFFIX}`;
+}
+
+function kelvinToRgb(kelvinInput) {
+  const kelvin = Math.max(1000, Math.min(40000, Number(kelvinInput) || 5200));
+  const temp = kelvin / 100;
+  let red;
+  let green;
+  let blue;
+
+  if (temp <= 66) {
+    red = 255;
+    green = 99.4708025861 * Math.log(temp) - 161.1195681661;
+    blue = temp <= 19 ? 0 : 138.5177312231 * Math.log(temp - 10) - 305.0447927307;
+  } else {
+    red = 329.698727446 * ((temp - 60) ** -0.1332047592);
+    green = 288.1221695283 * ((temp - 60) ** -0.0755148492);
+    blue = 255;
+  }
+  return {
+    r: Math.max(0, Math.min(255, red)) / 255,
+    g: Math.max(0, Math.min(255, green)) / 255,
+    b: Math.max(0, Math.min(255, blue)) / 255
+  };
+}
+
+function makeDefaultLightingState(envId) {
+  const preset = ENV_THEME_PRESETS[envId] || ENV_THEME_PRESETS.default_lounge;
+  return {
+    keyIntensity: Number(preset.key.intensity || DEFAULT_LIGHTING.keyIntensity),
+    fillIntensity: Number(preset.fill.intensity || DEFAULT_LIGHTING.fillIntensity),
+    rimIntensity: Number(preset.rim.intensity || DEFAULT_LIGHTING.rimIntensity),
+    ambientIntensity: Number(preset.ambient.intensity || DEFAULT_LIGHTING.ambientIntensity),
+    temperature: DEFAULT_LIGHTING.temperature,
+    hdriIntensity: DEFAULT_LIGHTING.hdriIntensity,
+    shadowDarkness: DEFAULT_LIGHTING.shadowDarkness,
+    fogDensity: DEFAULT_LIGHTING.fogDensity
+  };
+}
+
+function sanitizeLightingState(settings) {
+  return {
+    keyIntensity: clampValue(Number(settings?.keyIntensity), 0, 10, DEFAULT_LIGHTING.keyIntensity),
+    fillIntensity: clampValue(Number(settings?.fillIntensity), 0, 10, DEFAULT_LIGHTING.fillIntensity),
+    rimIntensity: clampValue(Number(settings?.rimIntensity), 0, 10, DEFAULT_LIGHTING.rimIntensity),
+    ambientIntensity: clampValue(Number(settings?.ambientIntensity), 0, 5, DEFAULT_LIGHTING.ambientIntensity),
+    temperature: clampValue(Number(settings?.temperature), 2000, 9000, DEFAULT_LIGHTING.temperature),
+    hdriIntensity: clampValue(Number(settings?.hdriIntensity), 0, 3, DEFAULT_LIGHTING.hdriIntensity),
+    shadowDarkness: clampValue(Number(settings?.shadowDarkness), 0, 1, DEFAULT_LIGHTING.shadowDarkness),
+    fogDensity: clampValue(Number(settings?.fogDensity), 0, 0.08, DEFAULT_LIGHTING.fogDensity)
+  };
+}
+
+function loadLightingForEnvironment(envId) {
+  const id = String(envId || 'casino_lounge');
+  if (envLightingStateById.has(id)) {
+    return sanitizeLightingState(envLightingStateById.get(id));
+  }
+  const defaults = makeDefaultLightingState(id);
+  let merged = { ...defaults };
+  try {
+    const raw = localStorage.getItem(lightingStorageKey(id));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      merged = { ...defaults, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+    } else {
+      localStorage.setItem(lightingStorageKey(id), JSON.stringify(defaults));
+    }
+  } catch {
+    localStorage.setItem(lightingStorageKey(id), JSON.stringify(defaults));
+    merged = defaults;
+  }
+  const sanitized = sanitizeLightingState(merged);
+  envLightingStateById.set(id, sanitized);
+  return sanitized;
+}
+
+function persistLightingForEnvironment(envId) {
+  if (!activeLightingState) return;
+  const id = String(envId || currentEnvironmentId || 'casino_lounge');
+  const safe = sanitizeLightingState(activeLightingState);
+  envLightingStateById.set(id, safe);
+  localStorage.setItem(lightingStorageKey(id), JSON.stringify(safe));
+}
+
+function setLightingControlValues(settings) {
+  const safe = sanitizeLightingState(settings);
+  for (const key of Object.keys(lightingInputs)) {
+    const input = lightingInputs[key];
+    const label = lightingValueLabels[key];
+    if (input) {
+      input.value = `${safe[key]}`;
+    }
+    if (label) {
+      label.textContent = key === 'temperature'
+        ? `${Math.round(safe[key])}`
+        : safe[key].toFixed(key === 'fogDensity' ? 3 : 2);
+    }
+  }
+}
+
+function applyLightingState(settings, { persist = false } = {}) {
+  const safe = sanitizeLightingState(settings);
+  activeLightingState = { ...safe };
+  const warmth = kelvinToRgb(safe.temperature);
+  const ambientDarknessFactor = 1 - safe.shadowDarkness * 0.45;
+
+  keyLight.color.setRGB(warmth.r, warmth.g, warmth.b);
+  fillLight.color.setRGB(
+    Math.min(1, warmth.r * 0.72 + 0.18),
+    Math.min(1, warmth.g * 0.8 + 0.16),
+    Math.min(1, warmth.b * 1.08 + 0.14)
+  );
+  rimLight.color.setRGB(
+    Math.min(1, warmth.r * 1.03 + 0.05),
+    Math.min(1, warmth.g * 0.92 + 0.06),
+    Math.min(1, warmth.b * 0.86 + 0.07)
+  );
+
+  keyLight.intensity = safe.keyIntensity;
+  fillLight.intensity = safe.fillIntensity;
+  rimLight.intensity = safe.rimIntensity;
+  ambient.intensity = safe.ambientIntensity * ambientDarknessFactor;
+
+  scene.environmentIntensity = safe.hdriIntensity;
+  if (scene.fog) {
+    if (safe.fogDensity > 0.0001) {
+      scene.fog = new THREE.FogExp2(currentFogColor, safe.fogDensity);
+    } else {
+      scene.fog = new THREE.Fog(currentFogColor, currentFogNear, currentFogFar);
+    }
+  }
+
+  keyLight.shadow.normalBias = 0.012 + safe.shadowDarkness * 0.025;
+  keyLight.shadow.radius = 1 + safe.shadowDarkness * 8;
+
+  setLightingControlValues(safe);
+  if (lightingStateText) {
+    lightingStateText.textContent = `Lighting: ${currentEnvironmentId || 'env'} | K ${Math.round(safe.temperature)} | HDRI ${safe.hdriIntensity.toFixed(2)}`;
+  }
+  if (persist) {
+    persistLightingForEnvironment(currentEnvironmentId || 'casino_lounge');
+  }
+}
+
+function updateLightingFromControls({ persist = false } = {}) {
+  const next = {
+    keyIntensity: Number(lightingInputs.keyIntensity?.value ?? activeLightingState?.keyIntensity ?? DEFAULT_LIGHTING.keyIntensity),
+    fillIntensity: Number(lightingInputs.fillIntensity?.value ?? activeLightingState?.fillIntensity ?? DEFAULT_LIGHTING.fillIntensity),
+    rimIntensity: Number(lightingInputs.rimIntensity?.value ?? activeLightingState?.rimIntensity ?? DEFAULT_LIGHTING.rimIntensity),
+    ambientIntensity: Number(lightingInputs.ambientIntensity?.value ?? activeLightingState?.ambientIntensity ?? DEFAULT_LIGHTING.ambientIntensity),
+    temperature: Number(lightingInputs.temperature?.value ?? activeLightingState?.temperature ?? DEFAULT_LIGHTING.temperature),
+    hdriIntensity: Number(lightingInputs.hdriIntensity?.value ?? activeLightingState?.hdriIntensity ?? DEFAULT_LIGHTING.hdriIntensity),
+    shadowDarkness: Number(lightingInputs.shadowDarkness?.value ?? activeLightingState?.shadowDarkness ?? DEFAULT_LIGHTING.shadowDarkness),
+    fogDensity: Number(lightingInputs.fogDensity?.value ?? activeLightingState?.fogDensity ?? DEFAULT_LIGHTING.fogDensity)
+  };
+  applyLightingState(next, { persist });
+}
+
+function resetLightingForCurrentEnvironment() {
+  const envId = currentEnvironmentId || 'casino_lounge';
+  const defaults = makeDefaultLightingState(envId);
+  envLightingStateById.set(envId, defaults);
+  localStorage.setItem(lightingStorageKey(envId), JSON.stringify(defaults));
+  applyLightingState(defaults, { persist: false });
+}
+
+async function copyLightingJson() {
+  const payload = sanitizeLightingState(activeLightingState || makeDefaultLightingState(currentEnvironmentId || 'casino_lounge'));
+  const text = JSON.stringify(payload, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    logMessage('Copied lighting JSON.', 1400);
+  } catch {
+    logMessage('Could not copy lighting JSON.', 1800);
+  }
+}
+
 function makeNoiseTexture(size, drawFn) {
   const canvasEl = document.createElement('canvas');
   canvasEl.width = size;
@@ -1586,21 +1837,59 @@ function clampAvatarBaseY(baseY, seatIndex) {
 function enforceAvatarWorldFloorClamp(seatIndex, avatarGroup) {
   if (!avatarGroup) return;
   const minWorldY = FLOOR_Y + 0.05;
+  const minVisibleTopY = FLOOR_Y + 0.42;
 
   avatarGroup.updateWorldMatrix(true, true);
-  tmpBox.setFromObject(avatarGroup);
-  const meshBottomY = Number.isFinite(tmpBox.min.y) ? tmpBox.min.y : null;
+  let meshBottomY = null;
+  let meshTopY = null;
+  let meshFound = false;
+  avatarGroup.traverse((node) => {
+    if (!node?.isMesh || !node.geometry) return;
+    meshFound = true;
+    if (!node.geometry.boundingBox) {
+      node.geometry.computeBoundingBox();
+    }
+    if (!node.geometry.boundingBox) return;
+    tmpGeoBox.copy(node.geometry.boundingBox);
+    tmpMeshBox.copy(tmpGeoBox).applyMatrix4(node.matrixWorld);
+    if (!Number.isFinite(tmpMeshBox.min.y)) return;
+    meshBottomY = meshBottomY == null ? tmpMeshBox.min.y : Math.min(meshBottomY, tmpMeshBox.min.y);
+    if (Number.isFinite(tmpMeshBox.max.y)) {
+      meshTopY = meshTopY == null ? tmpMeshBox.max.y : Math.max(meshTopY, tmpMeshBox.max.y);
+    }
+  });
+
+  if (!meshFound) {
+    tmpBox.setFromObject(avatarGroup);
+    if (Number.isFinite(tmpBox.min.y)) {
+      meshBottomY = tmpBox.min.y;
+    }
+  }
+
   if (meshBottomY != null && meshBottomY < minWorldY) {
     const delta = minWorldY - meshBottomY;
     avatarGroup.position.y += delta;
+    if (meshTopY != null) {
+      meshTopY += delta;
+    }
     warnOnce(
       `avatarWorldFloorClamp:${seatIndex}`,
       `[avatar] clamped above floor seat=${seatIndex} worldY=${meshBottomY.toFixed(3)}`
+    );
+  }
+
+  if (meshTopY != null && meshTopY < minVisibleTopY) {
+    const delta = minVisibleTopY - meshTopY;
+    avatarGroup.position.y += delta;
+    warnOnce(
+      `avatarWorldTopClamp:${seatIndex}`,
+      `[avatar] raised for visibility seat=${seatIndex} topY=${meshTopY.toFixed(3)}`
     );
     return;
   }
 
   // Fallback to group-origin clamp in case bbox is unavailable.
+  avatarGroup.updateWorldMatrix(true, false);
   tmpV3B.setFromMatrixPosition(avatarGroup.matrixWorld);
   if (tmpV3B.y < minWorldY) {
     const delta = minWorldY - tmpV3B.y;
@@ -1609,6 +1898,12 @@ function enforceAvatarWorldFloorClamp(seatIndex, avatarGroup) {
       `avatarWorldFloorClampOrigin:${seatIndex}`,
       `[avatar] origin clamp seat=${seatIndex} worldY=${tmpV3B.y.toFixed(3)}`
     );
+  }
+}
+
+function enforceAllAvatarFloorClamps() {
+  for (let seatIndex = 0; seatIndex < avatarSeatGroups.length; seatIndex += 1) {
+    enforceAvatarWorldFloorClamp(seatIndex, avatarSeatGroups[seatIndex]);
   }
 }
 
@@ -1681,31 +1976,31 @@ function endHudBlockDrag() {
   hudPointerId = null;
 }
 
-function beginBettingModalDrag(pointerId, clientX, clientY) {
-  draggingBettingModal = true;
-  bettingModalPointerId = pointerId;
-  bettingModalDragStart = { x: clientX, y: clientY };
-  bettingModalOffsetStart = {
-    x: Number(bettingModalSettings.offsetX || 0),
-    y: Number(bettingModalSettings.offsetY || 0)
+function beginChipWidgetDrag(pointerId, clientX, clientY) {
+  draggingChipWidget = true;
+  chipWidgetPointerId = pointerId;
+  chipWidgetDragStart = { x: clientX, y: clientY };
+  chipWidgetOffsetStart = {
+    x: Number(chipWidgetSettings.offsetX || 0),
+    y: Number(chipWidgetSettings.offsetY || 0)
   };
-  bettingModalDragHandle?.classList.add('dragging');
+  chipTotalsDragHandle?.classList.add('dragging');
 }
 
-function updateBettingModalDrag(clientX, clientY) {
-  if (!draggingBettingModal) return;
-  const dx = clientX - bettingModalDragStart.x;
-  const dy = clientY - bettingModalDragStart.y;
-  bettingModalSettings.offsetX = bettingModalOffsetStart.x + dx;
-  bettingModalSettings.offsetY = bettingModalOffsetStart.y + dy;
-  applyBettingModalSettings({ persist: true });
+function updateChipWidgetDrag(clientX, clientY) {
+  if (!draggingChipWidget) return;
+  const dx = clientX - chipWidgetDragStart.x;
+  const dy = clientY - chipWidgetDragStart.y;
+  chipWidgetSettings.offsetX = chipWidgetOffsetStart.x + dx;
+  chipWidgetSettings.offsetY = chipWidgetOffsetStart.y + dy;
+  applyChipWidgetSettings({ persist: true });
 }
 
-function endBettingModalDrag() {
-  if (!draggingBettingModal) return;
-  draggingBettingModal = false;
-  bettingModalPointerId = null;
-  bettingModalDragHandle?.classList.remove('dragging');
+function endChipWidgetDrag() {
+  if (!draggingChipWidget) return;
+  draggingChipWidget = false;
+  chipWidgetPointerId = null;
+  chipTotalsDragHandle?.classList.remove('dragging');
 }
 
 function refreshLocalHandScreenBounds() {
@@ -1892,6 +2187,8 @@ function updatePanelAutoBehavior() {
   }
 
   updateActionModal();
+  updateBidTray();
+  updateChipTray();
   lastPhase = roomState.phase;
 }
 
@@ -1901,6 +2198,7 @@ function showSections() {
     players: false,
     game: false,
     betting: false,
+    lighting: false,
     view: false,
     sceneTuning: false,
     debugTable: false,
@@ -1915,6 +2213,7 @@ function showSections() {
     show.players = true;
     show.game = true;
     show.betting = true;
+    show.lighting = true;
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
@@ -1922,6 +2221,7 @@ function showSections() {
   } else if (roomState.phase === PHASES.BIDDING) {
     show.game = true;
     show.betting = true;
+    show.lighting = true;
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
@@ -1929,6 +2229,7 @@ function showSections() {
   } else if (roomState.phase === PHASES.BETTING) {
     show.game = true;
     show.betting = true;
+    show.lighting = true;
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
@@ -1936,6 +2237,7 @@ function showSections() {
   } else if (roomState.phase === PHASES.CHOOSE_MODE || roomState.phase === PHASES.CHOOSE_TRUMP) {
     show.game = true;
     show.betting = true;
+    show.lighting = true;
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
@@ -1943,6 +2245,7 @@ function showSections() {
   } else if (roomState.phase === PHASES.PLAYING) {
     show.game = true;
     show.betting = true;
+    show.lighting = true;
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
@@ -1951,6 +2254,7 @@ function showSections() {
   } else {
     show.game = true;
     show.betting = true;
+    show.lighting = true;
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
@@ -1962,6 +2266,7 @@ function showSections() {
   sectionPlayers.classList.toggle('hidden', !show.players);
   sectionGame.classList.toggle('hidden', !show.game);
   sectionBetting.classList.toggle('hidden', !show.betting);
+  sectionLighting.classList.toggle('hidden', !show.lighting);
   sectionView.classList.toggle('hidden', !show.view);
   sectionSceneTuning.classList.toggle('hidden', !show.sceneTuning);
   sectionDebugTable.classList.toggle('hidden', !show.debugTable);
@@ -1975,6 +2280,18 @@ function closeActionModal() {
   actionModal.classList.add('hidden');
   actionModalButtons?.replaceChildren();
   actionModalModeButtons?.replaceChildren();
+}
+
+function closeBidTray() {
+  if (!bidTray) return;
+  bidTray.classList.add('hidden');
+  bidTrayButtons?.replaceChildren();
+}
+
+function closeChipTray() {
+  if (!chipTray) return;
+  chipTray.classList.add('hidden');
+  chipTrayButtons?.replaceChildren();
 }
 
 function createActionButton(label, onClick, { disabled = false, className = '' } = {}) {
@@ -1998,14 +2315,13 @@ function updateActionModal() {
   }
 
   const phase = roomState.phase;
-  if (phase === PHASES.BETTING) {
+  if (phase === PHASES.BETTING || phase === PHASES.BIDDING) {
     closeActionModal();
     return;
   }
-  const canBidNow = localTurnToBid();
   const canChooseMode = phase === PHASES.CHOOSE_MODE && localIsBidder();
   const canChooseTrump = phase === PHASES.CHOOSE_TRUMP && localIsBidder() && roomState.mode === MODES.TRUMPS;
-  const shouldShow = phase === PHASES.BIDDING || phase === PHASES.CHOOSE_MODE || phase === PHASES.CHOOSE_TRUMP;
+  const shouldShow = phase === PHASES.CHOOSE_MODE || phase === PHASES.CHOOSE_TRUMP;
   if (!shouldShow) {
     closeActionModal();
     return;
@@ -2014,51 +2330,6 @@ function updateActionModal() {
   actionModal.classList.remove('hidden');
   actionModalButtons.replaceChildren();
   actionModalModeButtons.replaceChildren();
-
-  if (phase === PHASES.BIDDING) {
-    actionModalTitle.textContent = 'Bidding';
-    const highBid = getCurrentHighBid();
-    if (!canBidNow) {
-      actionModalBody.textContent = `Waiting for Seat ${Number(roomState.turnSeat) + 1} to bid...`;
-      return;
-    }
-
-    actionModalBody.textContent = `Your turn. Current high bid: ${highBid || 'none'}`;
-    const passBtn = createActionButton('Pass', () => {
-      pendingLocalBidChoice = 'PASS';
-      updateNameplates();
-      sendAction('submitBid', { bid: null });
-      forceClosePanel = true;
-      closeActionModal();
-      updatePanelAutoBehavior();
-    });
-    actionModalModeButtons.appendChild(passBtn);
-
-    for (let bid = 30; bid <= 42; bid += 1) {
-      const btn = createActionButton(String(bid), () => {
-        pendingLocalBidChoice = null;
-        sendAction('submitBid', { bid });
-        forceClosePanel = true;
-        closeActionModal();
-        updatePanelAutoBehavior();
-      }, {
-        disabled: bid <= highBid
-      });
-      btn.addEventListener('mouseenter', () => {
-        if (btn.disabled) return;
-        pendingLocalBidChoice = bid;
-        updateNameplates();
-      });
-      btn.addEventListener('mouseleave', () => {
-        if (pendingLocalBidChoice === bid) {
-          pendingLocalBidChoice = null;
-          updateNameplates();
-        }
-      });
-      actionModalButtons.appendChild(btn);
-    }
-    return;
-  }
 
   if (phase === PHASES.CHOOSE_MODE) {
     actionModalTitle.textContent = 'Choose Mode';
@@ -2103,11 +2374,73 @@ function updateActionModal() {
   }
 }
 
-function closeBettingModal() {
-  if (!bettingModal) return;
-  bettingModal.classList.add('hidden');
-  bettingModalButtons?.replaceChildren();
-  bettingModalOpenHandId = null;
+function currentHighBidInfo() {
+  if (!roomState?.bidHistory) return { highBid: 0, highBidderSeat: null };
+  let highBid = 0;
+  let highBidderSeat = null;
+  for (const entry of roomState.bidHistory) {
+    if (!Number.isInteger(entry?.bid)) continue;
+    if (entry.bid >= highBid) {
+      highBid = entry.bid;
+      highBidderSeat = Number.isInteger(entry.seatIndex) ? entry.seatIndex : highBidderSeat;
+    }
+  }
+  return { highBid, highBidderSeat };
+}
+
+function updateBidTray() {
+  if (!bidTray || !bidTrayButtons || !bidTrayStatus || !bidTrayTimer || !bidTrayPassBtn) return;
+  if (!roomState || roomState.phase !== PHASES.BIDDING || !isConnected()) {
+    closeBidTray();
+    return;
+  }
+
+  const canBid = localTurnToBid();
+  const { highBid, highBidderSeat } = currentHighBidInfo();
+  const bidderText = Number.isInteger(highBidderSeat)
+    ? (roomState.seats?.[highBidderSeat]?.name || `Seat ${highBidderSeat + 1}`)
+    : 'none';
+  const timerText = roomState.turnTimerEnabled ? formatTimerMs(currentTimerRemainingMs()) : '--:--';
+  bidTray.classList.remove('hidden');
+  bidTrayTitle.textContent = canBid ? 'Your turn to bid' : 'Bidding in progress';
+  bidTrayStatus.textContent = `Current high bid: ${highBid || 'none'} by ${bidderText}`;
+  bidTrayTimer.textContent = `TIME: ${timerText}`;
+  bidTrayButtons.replaceChildren();
+
+  bidTrayPassBtn.disabled = !canBid;
+  bidTrayPassBtn.onclick = () => {
+    if (!canBid) return;
+    pendingLocalBidChoice = 'PASS';
+    updateNameplates();
+    sendAction('submitBid', { bid: null });
+    forceClosePanel = true;
+    updatePanelAutoBehavior();
+  };
+
+  for (let bid = 30; bid <= 42; bid += 1) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = String(bid);
+    btn.disabled = !canBid || bid <= highBid;
+    btn.addEventListener('mouseenter', () => {
+      if (btn.disabled) return;
+      pendingLocalBidChoice = bid;
+      updateNameplates();
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (pendingLocalBidChoice === bid) {
+        pendingLocalBidChoice = null;
+        updateNameplates();
+      }
+    });
+    btn.addEventListener('click', () => {
+      pendingLocalBidChoice = null;
+      sendAction('submitBid', { bid });
+      forceClosePanel = true;
+      updatePanelAutoBehavior();
+    });
+    bidTrayButtons.appendChild(btn);
+  }
 }
 
 function currentBettingState() {
@@ -2125,6 +2458,18 @@ function currentBettingState() {
       handId: Number(model.handId || roomState.handNumber || 0),
       amount: Math.max(1, Number(model.betAmount || roomState.baseBetAmount || 10)),
       pot: Number(((pendingOpenForHand ? pendingBettingOpenEvent?.betPot : null) ?? model.betPot) || 0),
+      currentBid: Math.max(
+        1,
+        Number(
+          ((pendingOpenForHand ? pendingBettingOpenEvent?.currentBid : null) ?? model.currentBid)
+          || model.betAmount
+          || roomState.baseBetAmount
+          || 10
+        )
+      ),
+      wagers: pendingOpenForHand && pendingBettingOpenEvent?.betWagers && typeof pendingBettingOpenEvent.betWagers === 'object'
+        ? { ...pendingBettingOpenEvent.betWagers, ...(model.betWagers || {}) }
+        : (model.betWagers && typeof model.betWagers === 'object' ? { ...model.betWagers } : {}),
       responses: Object.keys(mergedState).length
         ? mergedState
         : (roomState.pendingBets?.responses ? { ...roomState.pendingBets.responses } : {})
@@ -2137,60 +2482,124 @@ function currentBettingState() {
     handId: Number(pending?.handId || roomState.handNumber || 0),
     amount: Math.max(1, Number(pending?.amount || roomState.baseBetAmount || 10)),
     pot: Number(pending?.pot || 0),
+    currentBid: Math.max(1, Number(pending?.currentBid || pending?.amount || roomState.baseBetAmount || 10)),
+    wagers: pending?.wagers && typeof pending.wagers === 'object' ? { ...pending.wagers } : {},
     responses: pending?.responses ? { ...pending.responses } : {}
   };
 }
 
-function updateBettingModal() {
-  if (!bettingModal || !bettingModalTitle || !bettingModalBody || !bettingModalPot || !bettingModalButtons) {
+function updateChipTray() {
+  if (!chipTray || !chipTrayBody || !chipTrayPotText || !chipTrayButtons) {
     return;
   }
   const betting = currentBettingState();
   if (!roomState || !betting?.isOpen) {
-    closeBettingModal();
+    closeChipTray();
     return;
   }
 
-  if (betting.handId) {
-    bettingModalOpenHandId = betting.handId;
-  }
   const localSeat = getLocalSeat();
   const responses = betting.responses || {};
-  const amount = Math.max(1, Number(betting.amount || roomState.baseBetAmount || 10));
+  const baseAmount = Math.max(1, Number(betting.amount || roomState.baseBetAmount || 10));
+  const currentBid = Math.max(baseAmount, Number(betting.currentBid || baseAmount));
   const myStatus = Number.isInteger(localSeat) ? responses[String(localSeat)] : null;
+  const myWager = Number.isInteger(localSeat) ? Number((betting.wagers || {})[String(localSeat)] || 0) : 0;
   const remaining = Object.values(responses).filter((value) => value === 'pending').length;
   const isPending = Number.isInteger(localSeat) && myStatus === 'pending';
 
-  bettingModal.classList.remove('hidden');
-  bettingModalTitle.textContent = 'Betting';
-  bettingModalPot.textContent = `Hand ${Number(betting.handId || roomState.handNumber || 0)} | Base ${amount} | Pot ${Number(betting.pot || 0)} | Waiting ${remaining}`;
-  bettingModalButtons.replaceChildren();
+  chipTray.classList.remove('hidden');
+  chipTrayTitle.textContent = 'Chip Betting';
+  chipTrayPotText.textContent = `Hand ${Number(betting.handId || roomState.handNumber || 0)} | Base ${baseAmount} | Current ${currentBid} | Pot ${Number(betting.pot || 0)} | Waiting ${remaining}`;
+  chipTrayButtons.replaceChildren();
 
   if (!Number.isInteger(localSeat)) {
-    bettingModalBody.textContent = 'You are spectating. Waiting for bets...';
+    chipTrayBody.textContent = 'You are spectating. Waiting for bets...';
     return;
   }
 
   if (!isPending) {
     const statusText = myStatus === 'called' ? 'CALLED' : 'FOLDED';
-    bettingModalBody.textContent = `Waiting for other players... Your choice: ${statusText}`;
+    chipTrayBody.textContent = `Waiting for other players... Your choice: ${statusText} | Your wager: ${myWager}`;
     return;
   }
 
-  bettingModalBody.textContent = `Seat ${localSeat + 1}: choose CALL or FOLD for this hand.`;
-  const callBtn = createActionButton(`Call (${amount})`, async () => {
-    const ack = await emitWithAckTimeout('betting:respond', { decision: 'called' }, 3000);
+  let bidAmount = Math.max(baseAmount, Number(chipBidAmountInput?.value || currentBid || baseAmount));
+  if (chipBidAmountInput) {
+    chipBidAmountInput.value = `${bidAmount}`;
+  }
+  chipTrayBody.textContent = `Seat ${localSeat + 1}: wager ${myWager}. Current required bet: ${currentBid}.`;
+
+  const sendBetDecision = async (decision, amount = null) => {
+    const payload = amount == null ? { decision } : { decision, amount: Number(amount) };
+    const ack = await emitWithAckTimeout('betting:respond', payload, 3000);
     if (!ack?.ok) {
       logMessage(ack?.message || 'Betting response failed.', 1800);
+      return false;
     }
+    return true;
+  };
+
+  chipMinusBtn.onclick = () => {
+    bidAmount = Math.max(1, Number(chipBidAmountInput?.value || bidAmount) - 1);
+    if (chipBidAmountInput) chipBidAmountInput.value = `${bidAmount}`;
+  };
+  chipPlusBtn.onclick = () => {
+    bidAmount = Math.max(1, Number(chipBidAmountInput?.value || bidAmount) + 1);
+    if (chipBidAmountInput) chipBidAmountInput.value = `${bidAmount}`;
+  };
+  chipBidAmountInput.onchange = () => {
+    bidAmount = Math.max(1, Number(chipBidAmountInput.value || baseAmount));
+    chipBidAmountInput.value = `${bidAmount}`;
+  };
+
+  const bidBtn = createActionButton(`Bid ${bidAmount}`, async () => {
+    const value = Math.max(1, Number(chipBidAmountInput?.value || bidAmount));
+    await sendBetDecision('bid', value);
+  });
+  const raiseBtn = createActionButton('Raise', async () => {
+    const value = Math.max(currentBid + 1, Number(chipBidAmountInput?.value || (currentBid + 1)));
+    await sendBetDecision('raise', value);
+  });
+  const callBtn = createActionButton(`Call (${currentBid})`, async () => {
+    await sendBetDecision('call');
   });
   const foldBtn = createActionButton('Fold', async () => {
-    const ack = await emitWithAckTimeout('betting:respond', { decision: 'folded' }, 3000);
-    if (!ack?.ok) {
-      logMessage(ack?.message || 'Betting response failed.', 1800);
-    }
+    await sendBetDecision('folded');
   });
-  bettingModalButtons.append(callBtn, foldBtn);
+
+  chipTrayButtons.append(bidBtn, raiseBtn, callBtn, foldBtn);
+}
+
+function updateChipTotalsWidget() {
+  if (!chipTotalsWidget || !chipTotalsList || !chipTotalsPot) return;
+  if (!roomState || !(roomState.bettingEnabledNextHand || roomState.bettingEnabled)) {
+    chipTotalsWidget.classList.add('hidden');
+    chipTotalsList.replaceChildren();
+    return;
+  }
+
+  chipTotalsWidget.classList.remove('hidden');
+  chipTotalsList.replaceChildren();
+  const betting = currentBettingState();
+  chipTotalsPot.textContent = `Pot: ${Number(betting?.pot || 0)}`;
+  for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
+    const seat = roomState.seats?.[seatIndex];
+    const chips = Number(roomState.sessionBankroll?.[String(seatIndex)] ?? 0);
+    const line = document.createElement('div');
+    line.textContent = `${seat?.name || `Seat ${seatIndex + 1}`}: ${chips}`;
+    chipTotalsList.appendChild(line);
+  }
+}
+
+function updateBettingModal() {
+  // Legacy alias retained for existing call sites.
+  updateChipTray();
+  updateChipTotalsWidget();
+}
+
+function closeBettingModal() {
+  // Legacy alias retained for existing call sites.
+  closeChipTray();
 }
 
 function updateBettingControls() {
@@ -2218,7 +2627,8 @@ function updateBettingControls() {
       bettingDebugText.textContent = 'Betting Debug | enabled: false | isOpen: false | handId: -';
     }
     if (bettingTotals) bettingTotals.replaceChildren();
-    closeBettingModal();
+    closeChipTray();
+    updateChipTotalsWidget();
     return;
   }
 
@@ -2843,7 +3253,15 @@ function applyStaticSeatedPose(model) {
   model.scale.y *= 0.76;
   tmpBox.setFromObject(model);
   model.position.y -= tmpBox.min.y;
-  model.position.y -= 0.06;
+  model.position.y -= 0.015;
+}
+
+function alignAvatarModelBaseToLocalGround(model) {
+  if (!model) return;
+  tmpBox.setFromObject(model);
+  if (!Number.isFinite(tmpBox.min.y)) return;
+  if (Math.abs(tmpBox.min.y) <= 0.00001) return;
+  model.position.y -= tmpBox.min.y;
 }
 
 function tuneImportedMaterials(root) {
@@ -2987,7 +3405,9 @@ async function setSeatAvatarModel(seatIndex, avatarId) {
     // Keep avatars fully static to avoid rocking/sway.
     void cloned.animations;
     applyStaticSeatedPose(cloned.scene);
+    alignAvatarModelBaseToLocalGround(cloned.scene);
     updateSeatTransforms();
+    enforceAvatarWorldFloorClamp(seatIndex, targetGroup);
   } catch {
     applyFallback();
   }
@@ -3207,6 +3627,7 @@ function updateSeatTransforms() {
     );
     let avatarBaseY = baseSeatHeightAboveFloor + sceneTuning.avatarY + perSeatYOffset;
     avatarBaseY = clampAvatarBaseY(avatarBaseY, seatIndex);
+    avatarBaseY += AVATAR_GLOBAL_NUDGE_Y;
     avatarGroup.position.set(seatDir.x * avatarRadius, avatarBaseY, seatDir.z * avatarRadius);
     avatarGroup.rotation.y = seatConfig.avatar.rotY;
     enforceAvatarWorldFloorClamp(seatIndex, avatarGroup);
@@ -3952,6 +4373,221 @@ async function chooseEnvironmentHdri(envRoot, environmentId, catalog) {
   return null;
 }
 
+const SHARED_PROP_FOLDERS = [
+  'lightbulb_led_4k',
+  'steel_frame_shelves_02_4k',
+  'desk_lamp_arm_01_4k',
+  'steel_frame_shelves_03_4k',
+  'modern_coffee_table_01_4k',
+  'Shelf_01_4k',
+  'wooden_table_02_4k',
+  'WoodenTable_01_4k',
+  'side_table_tall_01_4k',
+  'decorative_book_set_01_4k',
+  'hanging_picture_frame_03_4k',
+  'wooden_bookshelf_worn_4k',
+  'round_wooden_table_01_4k',
+  'side_table_01_4k',
+  'standing_picture_frame_02_4k',
+  'fancy_picture_frame_01_4k',
+  'industrial_wall_lamp_4k',
+  'vintage_oil_lamp_4k'
+];
+
+const ENV_DECOR_LAYOUTS = {
+  casino_lounge: [
+    { folder: 'industrial_wall_lamp_4k', pos: [-6, 2.2, 8], rotY: 0, scale: 0.35 },
+    { folder: 'industrial_wall_lamp_4k', pos: [6, 2.2, 8], rotY: 0, scale: 0.35 },
+    { folder: 'fancy_picture_frame_01_4k', pos: [0, 2.0, 8], rotY: 0, scale: 0.4 },
+    { folder: 'side_table_01_4k', pos: [7, 0, 6], rotY: -Math.PI / 2, scale: 0.42 },
+    { folder: 'standing_picture_frame_02_4k', pos: [7, 1.0, 6], rotY: -Math.PI / 2, scale: 0.34 },
+    { folder: 'vintage_oil_lamp_4k', pos: [7.2, 1.0, 5.8], rotY: 0, scale: 0.3 },
+    { folder: 'round_wooden_table_01_4k', pos: [-7, 0, 6], rotY: Math.PI / 7, scale: 0.46 }
+  ],
+  spooky_parlor: [
+    { folder: 'wooden_bookshelf_worn_4k', pos: [-7.5, 0, 7.5], rotY: Math.PI / 6, scale: 0.44 },
+    { folder: 'decorative_book_set_01_4k', pos: [-7.0, 1.4, 7.2], rotY: 0, scale: 0.28 },
+    { folder: 'side_table_tall_01_4k', pos: [7.5, 0, 7.0], rotY: -Math.PI / 5, scale: 0.4 },
+    { folder: 'vintage_oil_lamp_4k', pos: [7.5, 1.1, 7.0], rotY: 0, scale: 0.3 },
+    { folder: 'hanging_picture_frame_03_4k', pos: [-1.5, 2.0, 8.0], rotY: 0, scale: 0.38 },
+    { folder: 'lightbulb_led_4k', pos: [4.5, 3.5, 6.5], rotY: 0, scale: 0.34 }
+  ],
+  rustic_tavern: [
+    { folder: 'WoodenTable_01_4k', pos: [0, 0, 7.5], rotY: 0, scale: 0.45 },
+    { folder: 'wooden_table_02_4k', pos: [-6.5, 0, 6.5], rotY: Math.PI / 5, scale: 0.43 },
+    { folder: 'Shelf_01_4k', pos: [7.5, 0, 7.5], rotY: -Math.PI / 8, scale: 0.44 },
+    { folder: 'industrial_wall_lamp_4k', pos: [0, 2.2, 8], rotY: 0, scale: 0.34 },
+    { folder: 'decorative_book_set_01_4k', pos: [7.0, 1.3, 7.4], rotY: 0, scale: 0.28 },
+    { folder: 'vintage_oil_lamp_4k', pos: [0.4, 1.0, 7.2], rotY: 0, scale: 0.3 }
+  ],
+  modern_suite: [
+    { folder: 'modern_coffee_table_01_4k', pos: [0, 0, 7.5], rotY: 0, scale: 0.45 },
+    { folder: 'steel_frame_shelves_03_4k', pos: [-7.5, 0, 7.5], rotY: Math.PI / 8, scale: 0.44 },
+    { folder: 'steel_frame_shelves_02_4k', pos: [7.5, 0, 7.5], rotY: -Math.PI / 8, scale: 0.44 },
+    { folder: 'desk_lamp_arm_01_4k', pos: [0.6, 0.9, 7.3], rotY: 0, scale: 0.3 },
+    { folder: 'standing_picture_frame_02_4k', pos: [7.2, 1.4, 7.3], rotY: 0, scale: 0.34 },
+    { folder: 'fancy_picture_frame_01_4k', pos: [0, 2.0, 8.0], rotY: 0, scale: 0.38 }
+  ],
+  neon_arcade: [
+    { folder: 'steel_frame_shelves_02_4k', pos: [-7.5, 0, 7.5], rotY: Math.PI / 8, scale: 0.44 },
+    { folder: 'steel_frame_shelves_03_4k', pos: [7.5, 0, 7.5], rotY: -Math.PI / 8, scale: 0.44 },
+    { folder: 'lightbulb_led_4k', pos: [-7.0, 3.2, 7.0], rotY: 0, scale: 0.34 },
+    { folder: 'lightbulb_led_4k', pos: [7.0, 3.2, 7.0], rotY: 0, scale: 0.34 },
+    { folder: 'modern_coffee_table_01_4k', pos: [0, 0, 7.5], rotY: 0, scale: 0.45 },
+    { folder: 'desk_lamp_arm_01_4k', pos: [0.6, 0.9, 7.3], rotY: 0, scale: 0.3 },
+    { folder: 'hanging_picture_frame_03_4k', pos: [0, 2.0, 8.0], rotY: 0, scale: 0.38 }
+  ]
+};
+
+async function fetchSharedPropCatalog() {
+  if (decorDebugState.sharedCatalog) return decorDebugState.sharedCatalog;
+  try {
+    const res = await fetch('/api/shared-props', { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const payload = await res.json();
+    const items = Array.isArray(payload?.props) ? payload.props : [];
+    if (!sharedPropCatalogLogged) {
+      sharedPropCatalogLogged = true;
+      if (items.length) {
+        console.log(`[decor] shared props folders found: ${items.length}`);
+        for (const item of items) {
+          console.log(`[decor] ${item.folder} -> ${item.modelUrl || 'NO_MODEL_FOUND'}`);
+        }
+      } else {
+        console.error('[decor] No shared props found. Expected directory: client/assets/environments/_shared/props/');
+      }
+    }
+    decorDebugState.sharedCatalog = items;
+    return items;
+  } catch {
+    if (!sharedPropCatalogLogged) {
+      sharedPropCatalogLogged = true;
+      console.error('[decor] Failed to fetch shared props catalog from /api/shared-props');
+    }
+    return [];
+  }
+}
+
+function updateDecorStatusText(message) {
+  if (decorLoadText) decorLoadText.textContent = message;
+}
+
+function buildDecorProxy(name, color = 0xc8b28f) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(0.8, 0.8, 0.8),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.72, metalness: 0.06 })
+  );
+  base.castShadow = true;
+  base.receiveShadow = true;
+  g.add(base);
+  g.userData.proxy = true;
+  g.userData.name = name;
+  return g;
+}
+
+function clearDecorBoundsHelpers() {
+  for (const helper of decorDebugState.helpers) {
+    helper.parent?.remove(helper);
+  }
+  decorDebugState.helpers = [];
+}
+
+function refreshDecorBoundsHelpers() {
+  clearDecorBoundsHelpers();
+  if (!showDecorBounds) return;
+  for (const item of decorDebugState.props) {
+    if (!item?.object3d) continue;
+    const helper = new THREE.BoxHelper(item.object3d, 0x6fd3ff);
+    helper.material.depthTest = false;
+    helper.renderOrder = 22;
+    item.object3d.parent?.add(helper);
+    decorDebugState.helpers.push(helper);
+  }
+}
+
+async function loadDecorModelFromCatalogEntry(entry) {
+  if (!entry?.modelUrl) return null;
+  try {
+    const template = await loadModelTemplate(entry.modelUrl);
+    const model = clonedModelAsset(template).scene;
+    tuneImportedMaterials(model);
+    return model;
+  } catch (error) {
+    console.warn('[decor] model load failed', entry.folder, entry.modelUrl, error);
+    return null;
+  }
+}
+
+async function addEnvironmentDecor(roomRoot, environmentId) {
+  const layout = ENV_DECOR_LAYOUTS[environmentId] || [];
+  const catalog = await fetchSharedPropCatalog();
+  const byFolder = new Map((catalog || []).map((entry) => [String(entry.folder), entry]));
+  decorDebugState.props = [];
+  const missingExpected = SHARED_PROP_FOLDERS.filter((folder) => !byFolder.has(folder));
+  if (missingExpected.length) {
+    console.warn(`[decor] missing expected prop folders: ${missingExpected.join(', ')}`);
+  }
+
+  const decorRoot = new THREE.Group();
+  decorRoot.name = 'envDecorRoot';
+  roomRoot.add(decorRoot);
+
+  for (const spec of layout) {
+    const entry = byFolder.get(spec.folder);
+    let model = await loadDecorModelFromCatalogEntry(entry);
+    let modelUrl = entry?.modelUrl || '';
+    if (!model) {
+      model = buildDecorProxy(spec.folder, 0xbca480);
+      modelUrl = '';
+    }
+    const desiredX = Number(spec.pos?.[0] || 0);
+    const desiredY = FLOOR_Y + Number(spec.pos?.[1] || 0);
+    // Spec coordinates are authored with +Z as "back wall"; this scene uses -Z for back wall.
+    const desiredZ = -Number(spec.pos?.[2] || 0);
+    model.position.set(desiredX, desiredY, desiredZ);
+    model.rotation.y = Number(spec.rotY || 0);
+    model.scale.setScalar(Number(spec.scale || 0.35));
+    model.updateWorldMatrix(true, true);
+    tmpBox.setFromObject(model);
+    if (Number.isFinite(tmpBox.min.y) && Number.isFinite(tmpBox.max.y)) {
+      const maxDim = Math.max(
+        0.0001,
+        tmpBox.max.x - tmpBox.min.x,
+        tmpBox.max.y - tmpBox.min.y,
+        tmpBox.max.z - tmpBox.min.z
+      );
+      if (maxDim > 3.5) {
+        const downScale = 3.2 / maxDim;
+        model.scale.multiplyScalar(downScale);
+      } else if (maxDim < 0.15) {
+        const upScale = 0.35 / maxDim;
+        model.scale.multiplyScalar(upScale);
+      }
+      model.updateWorldMatrix(true, true);
+      tmpBox.setFromObject(model);
+      // Ground floor-level props while leaving elevated props (lamps/frames/tabletop) at authored height.
+      if (Math.abs(Number(spec.pos?.[1] || 0)) < 0.01 && Number.isFinite(tmpBox.min.y)) {
+        model.position.y += FLOOR_Y - tmpBox.min.y;
+      }
+    }
+    decorRoot.add(model);
+    decorDebugState.props.push({
+      name: spec.folder,
+      modelUrl,
+      object3d: model
+    });
+  }
+
+  updateDecorStatusText(`Decor: ${decorDebugState.props.length} placed (${environmentId})`);
+  if (decorDebugList) {
+    decorDebugList.textContent = decorDebugState.props.length
+      ? decorDebugState.props.map((entry) => `${entry.name} (${entry.modelUrl || 'proxy'})`).join('\n')
+      : 'No decor entries placed.';
+  }
+  refreshDecorBoundsHelpers();
+}
+
 function addCasinoTrim(roomRoot, roomWidth, roomDepth, wallHeight, material) {
   const trimHeight = 0.16;
   const trimDepth = 0.06;
@@ -4098,64 +4734,7 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   if (hdriTex) {
     scene.environment = hdriTex;
   }
-
-  const propCandidates = (catalog || []).filter((file) => {
-    const low = String(file).toLowerCase();
-    return low.includes('/props/') && (low.endsWith('.glb') || low.endsWith('.gltf') || low.endsWith('.obj'));
-  });
-  if (propCandidates.length) {
-    const propSlots = [
-      { pos: [-6.6, 0, -8.6], rotY: Math.PI * 0.2, scale: 0.9 },
-      { pos: [6.5, 0, -8.9], rotY: -Math.PI * 0.18, scale: 0.9 },
-      { pos: [-6.7, 0, -2.7], rotY: Math.PI * 0.45, scale: 0.85 },
-      { pos: [6.6, 0, -2.8], rotY: -Math.PI * 0.45, scale: 0.85 }
-    ];
-
-    const propUrls = propCandidates.slice(0, propSlots.length);
-    for (let i = 0; i < propUrls.length; i += 1) {
-      const url = propUrls[i];
-      try {
-        const template = await loadModelTemplate(url);
-        if (token !== environmentApplyToken) return;
-        const clone = clonedModelAsset(template).scene;
-        tuneImportedMaterials(clone);
-        const slot = propSlots[i];
-        clone.position.set(slot.pos[0], slot.pos[1], slot.pos[2]);
-        clone.rotation.y = slot.rotY;
-        clone.scale.setScalar(slot.scale);
-        roomRoot.add(clone);
-      } catch {
-        // Optional props are best-effort.
-      }
-    }
-  } else {
-    const frameMaterial = new THREE.MeshStandardMaterial({
-      map: trimBaseTex || woodTexture,
-      color: 0xffffff,
-      roughness: 0.62,
-      metalness: 0.02
-    });
-    const lampColor = environmentId === 'neon_arcade' ? 0x66ccff : 0xffcc8b;
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.07), frameMaterial);
-    frame.position.set(-5.6, 2.4, -9.2);
-    frame.castShadow = true;
-    frame.receiveShadow = true;
-    roomRoot.add(frame);
-
-    const frame2 = frame.clone();
-    frame2.position.set(5.6, 2.5, -9.1);
-    frame2.rotation.y = -0.1;
-    roomRoot.add(frame2);
-
-    const lampStem = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.05, 0.06, 1.8, 10),
-      frameMaterial
-    );
-    lampStem.position.set(0, 0.9, -8.9);
-    const lampGlow = new THREE.PointLight(lampColor, 0.48, 7.2, 2);
-    lampGlow.position.set(0, 1.9, -8.9);
-    roomRoot.add(lampStem, lampGlow);
-  }
+  await addEnvironmentDecor(roomRoot, environmentId);
 
   if (token !== environmentApplyToken) return;
   const floorBaseOk = !!floorBaseTex;
@@ -4166,7 +4745,8 @@ async function buildRoomEnvironment(entry, token, environmentId) {
     `floor=${floorBaseOk ? 'OK' : 'MISSING'}`,
     `walls=${wallBaseOk ? 'OK' : 'MISSING'}`,
     `trim=${trimBaseOk ? 'OK' : 'MISSING'}`,
-    `hdri=${hdriTex ? 'OK' : 'optional-missing'}`
+    `hdri=${hdriTex ? 'OK' : 'optional-missing'}`,
+    `decor=${decorDebugState.props.length}`
   ];
   if (envStatus.missingMaps.length) {
     statusDetailParts.push(`missingMaps=${envStatus.missingMaps.join(',')}`);
@@ -4213,9 +4793,14 @@ function applyEnvironment(environmentId) {
   rimLight.intensity = preset.rim.intensity;
   rimLight.position.set(...preset.rim.pos);
 
-  scene.fog = new THREE.Fog(preset.fog.color, preset.fog.near, preset.fog.far);
+  currentFogColor = preset.fog.color;
+  currentFogNear = preset.fog.near;
+  currentFogFar = preset.fog.far;
+  scene.fog = new THREE.Fog(currentFogColor, currentFogNear, currentFogFar);
   scene.environment = null;
   scene.background = new THREE.Color(preset.bottom);
+  const envLighting = loadLightingForEnvironment(safeId);
+  applyLightingState(envLighting, { persist: false });
   void buildRoomEnvironment({
     ...entry,
     root: environmentRootFor(entry)
@@ -4531,11 +5116,14 @@ function updateHud() {
     hudBidValue.textContent = '-';
     hudTrumpValue.textContent = '-';
     turnTimerHud.textContent = 'TIME: --';
+    closeBidTray();
+    closeChipTray();
     updateScoreboard();
     updateMarksMenu();
     updateBurnPanels();
     updateTimerControls();
     updateBettingControls();
+    updateChipTotalsWidget();
     updateEnvironmentControls();
     updateTableDominoDebugReadout(0);
     return;
@@ -4549,6 +5137,8 @@ function updateHud() {
   updateBurnPanels();
   updateTimerControls();
   updateBettingControls();
+  updateBidTray();
+  updateChipTotalsWidget();
   updateEnvironmentControls();
   updateTableDominoDebugReadout(roomState.trick?.length || 0);
 }
@@ -4578,10 +5168,13 @@ function updateTimerControls() {
 function updateTimerHud() {
   if (!roomState?.turnTimerEnabled) {
     turnTimerHud.textContent = 'TIME: --';
+    if (bidTrayTimer) bidTrayTimer.textContent = 'TIME: --';
     return;
   }
   const remaining = currentTimerRemainingMs();
-  turnTimerHud.textContent = `TIME: ${formatTimerMs(remaining)}`;
+  const text = `TIME: ${formatTimerMs(remaining)}`;
+  turnTimerHud.textContent = text;
+  if (bidTrayTimer) bidTrayTimer.textContent = text;
 }
 
 function updateEnvironmentControls() {
@@ -4623,6 +5216,18 @@ function updateEnvironmentControls() {
   if (!environmentLoadText?.textContent) {
     setEnvironmentLoadStatus(environmentLoadState || 'idle', environmentLoadDetail || '');
   }
+}
+
+function updateLightingControlsUi() {
+  if (!activeLightingState) {
+    const envId = currentEnvironmentId || roomState?.environmentId || 'casino_lounge';
+    activeLightingState = loadLightingForEnvironment(envId);
+  }
+  setLightingControlValues(activeLightingState);
+}
+
+function setupLightingControls() {
+  updateLightingControlsUi();
 }
 
 function setupViewControls() {
@@ -4978,6 +5583,7 @@ function updateBidControls() {
   const passBtn = document.getElementById('passBidBtn');
   pendingLocalBidChoice = null;
   const connected = isConnected();
+  updateBidTray();
 
   if (!roomState || roomState.phase !== PHASES.BIDDING) {
     passBtn.disabled = true;
@@ -5023,6 +5629,7 @@ function updateBidControls() {
     updatePanelAutoBehavior();
   };
   updateActionModal();
+  updateBidTray();
 }
 
 function updateTrumpControls() {
@@ -5296,6 +5903,8 @@ function handleServerPacket(data) {
       handId: Number(data.handId || roomState?.handNumber || 0),
       defaultBet: Math.max(1, Number(data.defaultBet || roomState?.baseBetAmount || 10)),
       betPot: Number(data.betPot || 0),
+      currentBid: Math.max(1, Number(data.currentBid || data.defaultBet || roomState?.baseBetAmount || 10)),
+      betWagers: data.betWagers && typeof data.betWagers === 'object' ? { ...data.betWagers } : {},
       betState: data.betState && typeof data.betState === 'object' ? { ...data.betState } : {}
     };
     if (roomState) {
@@ -5307,11 +5916,15 @@ function handleServerPacket(data) {
         isOpen: true,
         betAmount: Math.max(1, Number(data.defaultBet || roomState.baseBetAmount || 10)),
         betPot: Number(data.betPot || 0),
+        currentBid: Math.max(1, Number(data.currentBid || data.defaultBet || roomState.baseBetAmount || 10)),
+        betWagers: data.betWagers && typeof data.betWagers === 'object' ? { ...data.betWagers } : {},
         betState: data.betState && typeof data.betState === 'object' ? { ...data.betState } : {}
       };
       roomState.pendingBets = {
         amount: roomState.betting.betAmount,
         pot: roomState.betting.betPot,
+        currentBid: roomState.betting.currentBid,
+        wagers: { ...(roomState.betting.betWagers || {}) },
         handId,
         isOpen: true,
         openedAtTs: Date.now(),
@@ -5330,6 +5943,10 @@ function handleServerPacket(data) {
     if (roomState?.betting) {
       roomState.betting.isOpen = false;
       roomState.betting.betPot = Number(data.betPot || roomState.betting.betPot || 0);
+      roomState.betting.currentBid = Math.max(1, Number(data.currentBid || roomState.betting.currentBid || roomState.betting.betAmount || roomState.baseBetAmount || 10));
+      roomState.betting.betWagers = data.betWagers && typeof data.betWagers === 'object'
+        ? { ...data.betWagers }
+        : { ...(roomState.betting.betWagers || {}) };
       roomState.betting.betState = data.betState && typeof data.betState === 'object'
         ? { ...data.betState }
         : { ...(roomState.betting.betState || {}) };
@@ -5623,9 +6240,25 @@ function ensureButtons() {
     event.preventDefault();
   });
 
-  bettingModalDragHandle?.addEventListener('pointerdown', (event) => {
-    beginBettingModalDrag(event.pointerId, event.clientX, event.clientY);
+  chipTotalsDragHandle?.addEventListener('pointerdown', (event) => {
+    beginChipWidgetDrag(event.pointerId, event.clientX, event.clientY);
     event.preventDefault();
+  });
+
+  lightingInputs.keyIntensity?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
+  lightingInputs.fillIntensity?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
+  lightingInputs.rimIntensity?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
+  lightingInputs.ambientIntensity?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
+  lightingInputs.temperature?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
+  lightingInputs.hdriIntensity?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
+  lightingInputs.shadowDarkness?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
+  lightingInputs.fogDensity?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
+
+  resetLightingBtn?.addEventListener('click', () => {
+    resetLightingForCurrentEnvironment();
+  });
+  copyLightingBtn?.addEventListener('click', async () => {
+    await copyLightingJson();
   });
 
   environmentSelect.addEventListener('change', () => {
@@ -5684,6 +6317,23 @@ function ensureButtons() {
       tablePlayRoot.add(helper);
     }
     updateTableDominoDebugReadout(roomState?.trick?.length || 0);
+  });
+
+  decorBoundsToggle?.addEventListener('change', () => {
+    showDecorBounds = !!decorBoundsToggle.checked;
+    refreshDecorBoundsHelpers();
+  });
+
+  listLoadedPropsBtn?.addEventListener('click', () => {
+    if (!decorDebugList) return;
+    if (!decorDebugState.props.length) {
+      decorDebugList.textContent = 'No props loaded.';
+      return;
+    }
+    decorDebugList.textContent = decorDebugState.props.map((entry) => {
+      const source = entry.modelUrl ? entry.modelUrl : 'proxy';
+      return `${entry.name} (${source})`;
+    }).join('\n');
   });
 
   panelToggle.addEventListener('click', () => {
@@ -5745,9 +6395,9 @@ function ensureButtons() {
   });
 
   window.addEventListener('pointermove', (event) => {
-    if (!draggingBettingModal) return;
-    if (bettingModalPointerId != null && event.pointerId !== bettingModalPointerId) return;
-    updateBettingModalDrag(event.clientX, event.clientY);
+    if (!draggingChipWidget) return;
+    if (chipWidgetPointerId != null && event.pointerId !== chipWidgetPointerId) return;
+    updateChipWidgetDrag(event.clientX, event.clientY);
   });
 
   window.addEventListener('pointerup', (event) => {
@@ -5761,14 +6411,14 @@ function ensureButtons() {
   });
 
   window.addEventListener('pointerup', (event) => {
-    if (bettingModalPointerId != null && event.pointerId !== bettingModalPointerId) return;
-    endBettingModalDrag();
+    if (chipWidgetPointerId != null && event.pointerId !== chipWidgetPointerId) return;
+    endChipWidgetDrag();
   });
 
   window.addEventListener('pointercancel', () => {
     endNameplateDrag();
     endHudBlockDrag();
-    endBettingModalDrag();
+    endChipWidgetDrag();
   });
 
   window.addEventListener('keydown', (event) => {
@@ -5893,6 +6543,11 @@ function animate() {
   requestAnimationFrame(animate);
   clock.getDelta();
   controls.update();
+  const now = performance.now();
+  if (now - lastAvatarFloorClampTs > 350) {
+    lastAvatarFloorClampTs = now;
+    enforceAllAvatarFloorClamps();
+  }
   updateNameplatePositions();
   updatePenaltyEmojiPositions();
   updateTimerHud();
@@ -6008,15 +6663,17 @@ runBootStep('loadStoredViewSettings', loadStoredViewSettings);
 runBootStep('loadStoredChairVisibility', loadStoredChairVisibility);
 runBootStep('loadStoredBurnPanelOpacity', loadStoredBurnPanelOpacity);
 runBootStep('loadStoredTableHudSettings', loadStoredTableHudSettings);
-runBootStep('loadStoredBettingModalSettings', loadStoredBettingModalSettings);
+runBootStep('loadStoredChipWidgetSettings', loadStoredChipWidgetSettings);
 runBootStep('loadStoredMuteSetting', loadStoredMuteSetting);
 runBootStep('initAudioManager', initAudioManager);
 runBootStep('updateSceneTuningUi', updateSceneTuningUi);
 runBootStep('updateViewControlsUi', updateViewControlsUi);
+runBootStep('updateLightingControlsUi', updateLightingControlsUi);
 runBootStep('applyTableHudSettings', applyTableHudSettings);
-runBootStep('applyBettingModalSettings', applyBettingModalSettings);
+runBootStep('applyChipWidgetSettings', applyChipWidgetSettings);
 runBootStep('setupViewControls', setupViewControls);
 runBootStep('setupSceneTuningControls', setupSceneTuningControls);
+runBootStep('setupLightingControls', setupLightingControls);
 runBootStep('addPointerInteraction', addPointerInteraction);
 runBootStep('showSections', showSections);
 runBootStep('setPanelOpen', () => setPanelOpen(true));

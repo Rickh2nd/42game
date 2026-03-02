@@ -47,6 +47,15 @@
 
         <div id="turnTimerHud">TIME: --</div>
 
+        <div id="chipTotalsWidget" class="chipTotalsWidget hidden" aria-label="Chip totals">
+          <div class="chipTotalsHeader">
+            <span>CHIPS</span>
+            <button id="chipTotalsDragHandle" class="widgetDragHandle" title="Drag chip totals widget">MOVE</button>
+          </div>
+          <div id="chipTotalsPot" class="smallText">Pot: 0</div>
+          <div id="chipTotalsList" class="smallText"></div>
+        </div>
+
         <div id="burnPanels">
           <aside class="burnPanel burnPanelLeft" id="burnPanel-team1" aria-label="Team 1 burn pile">
             <div class="burnPanelInner">
@@ -177,6 +186,7 @@
             <div id="environmentStateText" class="smallText"></div>
             <div id="environmentLoadText" class="smallText"></div>
           </div>
+          <div class="smallText" id="decorLoadText">Decor: pending</div>
           <div class="viewControl">
             <label for="burn_panel_opacity">Burn Panel Opacity</label>
             <input id="burn_panel_opacity" type="range" min="0.01" max="1.00" step="0.01" />
@@ -193,6 +203,55 @@
               Mute
             </label>
           </div>
+        </section>
+
+        <section id="section-lighting" class="panelSection">
+          <h2>LIGHTING</h2>
+          <div class="viewControl">
+            <label for="light_key_intensity">Key Intensity</label>
+            <input id="light_key_intensity" type="range" min="0.00" max="10.00" step="0.01" />
+            <span id="light_key_intensity_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="light_fill_intensity">Fill Intensity</label>
+            <input id="light_fill_intensity" type="range" min="0.00" max="10.00" step="0.01" />
+            <span id="light_fill_intensity_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="light_rim_intensity">Rim Intensity</label>
+            <input id="light_rim_intensity" type="range" min="0.00" max="10.00" step="0.01" />
+            <span id="light_rim_intensity_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="light_ambient_intensity">Ambient Intensity</label>
+            <input id="light_ambient_intensity" type="range" min="0.00" max="5.00" step="0.01" />
+            <span id="light_ambient_intensity_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="light_temperature">Warmth (K)</label>
+            <input id="light_temperature" type="range" min="2000" max="9000" step="25" />
+            <span id="light_temperature_val" class="viewVal">5600</span>
+          </div>
+          <div class="viewControl">
+            <label for="light_hdri_intensity">HDRI Intensity</label>
+            <input id="light_hdri_intensity" type="range" min="0.00" max="3.00" step="0.01" />
+            <span id="light_hdri_intensity_val" class="viewVal">1.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="light_shadow_darkness">Shadow Darkness</label>
+            <input id="light_shadow_darkness" type="range" min="0.00" max="1.00" step="0.01" />
+            <span id="light_shadow_darkness_val" class="viewVal">0.35</span>
+          </div>
+          <div class="viewControl">
+            <label for="light_fog_density">Fog Density</label>
+            <input id="light_fog_density" type="range" min="0.00" max="0.08" step="0.001" />
+            <span id="light_fog_density_val" class="viewVal">0.000</span>
+          </div>
+          <div class="buttonRow">
+            <button id="resetLightingBtn">Reset Lighting</button>
+            <button id="copyLightingBtn">Copy Lighting JSON</button>
+          </div>
+          <div id="lightingStateText" class="smallText">Lighting: not loaded</div>
         </section>
 
         <section id="section-view" class="panelSection">
@@ -378,6 +437,18 @@
             <button id="spawnTestDominoBtn">Spawn Test Domino</button>
           </div>
           <div id="tableDominoDebugReadout" class="smallText">Trick: 0 | Rendered: 0 | tabletopY: 0.000</div>
+          <hr />
+          <h2>DEBUG: DECOR</h2>
+          <div class="controlRow">
+            <label>
+              <input id="decorBoundsToggle" type="checkbox" />
+              Show Decor Bounds
+            </label>
+          </div>
+          <div class="buttonRow">
+            <button id="listLoadedPropsBtn">List Loaded Props</button>
+          </div>
+          <div id="decorDebugList" class="smallText">No props loaded yet.</div>
         </section>
 
         <section id="section-bidding" class="panelSection">
@@ -445,17 +516,33 @@
       </div>
     </div>
 
-    <div id="betModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Betting popup">
-      <div class="modalBackdrop actionModalBackdrop"></div>
-      <div class="modalPanel actionModalPanel bettingModalPanel">
-        <div class="modalHeader">
-          <h2 id="bettingModalTitle">Betting</h2>
-          <button id="bettingModalDragHandle" class="modalDragHandle" title="Drag betting modal">MOVE</button>
-        </div>
-        <div id="bettingModalBody" class="smallText">Waiting for betting choices...</div>
-        <div id="bettingModalPot" class="smallText"></div>
-        <div id="bettingModalButtons" class="buttonRow"></div>
+    <div id="bidTray" class="bottomTray hidden" role="dialog" aria-modal="false" aria-label="Bid tray">
+      <div class="bottomTrayHeader">
+        <h2 id="bidTrayTitle">Your turn to bid</h2>
+        <div id="bidTrayTimer" class="smallText">TIME: --</div>
       </div>
+      <div id="bidTrayStatus" class="smallText">Current high bid: none</div>
+      <div class="bottomTrayRow">
+        <button id="bidTrayPassBtn">Pass</button>
+        <div id="bidTrayButtons" class="gridButtons compactBidGrid"></div>
+      </div>
+    </div>
+
+    <div id="chipTray" class="bottomTray hidden" role="dialog" aria-modal="false" aria-label="Chip betting tray">
+      <div class="bottomTrayHeader">
+        <h2 id="chipTrayTitle">Chip Betting</h2>
+        <div id="chipTrayPotText" class="smallText">Pot 0</div>
+      </div>
+      <div id="chipTrayBody" class="smallText">Waiting for betting choices...</div>
+      <div class="chipInputRow">
+        <label for="chipBidAmountInput">Bid Amount</label>
+        <div class="chipStepper">
+          <button id="chipMinusBtn" type="button">-</button>
+          <input id="chipBidAmountInput" type="number" min="1" step="1" value="10" />
+          <button id="chipPlusBtn" type="button">+</button>
+        </div>
+      </div>
+      <div id="chipTrayButtons" class="buttonRow"></div>
     </div>
 
     <div id="avatarModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Avatar picker">

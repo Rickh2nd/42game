@@ -527,3 +527,34 @@ Update (avatar under-floor fix pass):
 Validation:
 - `node --check client/main.js` pass.
 - Defaults remain unchanged for VIEW + SCENE tuning constants.
+
+Update (avatar-under-floor hard fix pass):
+- Added global avatar nudge constant `AVATAR_GLOBAL_NUDGE_Y = 0.08` and apply during seat transform placement.
+- Strengthened floor clamp by computing world-space mesh bounds per avatar mesh (not only group origin), then correcting Y if mesh bottom is below `FLOOR_Y + 0.05`.
+- Added periodic runtime clamp pass in `animate()` (every ~350ms) to catch late async model swaps/environment updates.
+- Reduced seated pose sink amount and added local-ground realignment helper after static pose is applied.
+- Validation: `node --check client/main.js` pass; local server boot pass.
+
+Update (bottom trays + props visibility + avatar floor safety pass):
+- Added bottom bidding and chip betting tray UI wiring in client runtime flow (no side panel auto-open for bidding/betting).
+- Tightened bottom tray sizing/spacing in `/client/styles.css` to reduce hand obstruction risk.
+- Kept chip totals widget draggable with persisted offsets (`texas42_chip_widget_pos_v1`) and live bankroll/pot updates.
+- Decor/props pass in `/client/main.js`:
+  - Added one-time startup logging of shared prop catalog (`[decor] folder -> modelUrl`).
+  - Added missing-folder warning and retained graceful proxy fallback if no model file exists.
+  - Fixed authored decor coordinate conversion so +Z authored "back wall" maps to scene back wall.
+  - Added adaptive prop auto-scale and floor grounding for floor-level props.
+- Avatar seating/floor safety pass:
+  - Reduced `AVATAR_GLOBAL_NUDGE_Y` to `0.015`.
+  - Strengthened floor clamp to keep avatar mesh bottoms above floor and ensure at least a visible top section above floor (`minVisibleTopY`) so avatars cannot disappear below floor plane.
+
+Validation:
+- `node --check client/main.js` pass.
+- `node --check server/server.js` pass.
+- Runtime endpoint checks on live server:
+  - `/health` OK
+  - socket.io polling handshake OK
+  - `/api/environment-files/<env>` returns expected files
+  - texture URLs for spooky/rustic/modern/neon floor/walls/trim return 200
+  - casino uses `materials/carpet` for floor (expected `materials/floor` 404)
+- `/api/shared-props` reports 18 folders but 0 model files currently present; client decor pipeline falls back to visible proxy props and logs details.

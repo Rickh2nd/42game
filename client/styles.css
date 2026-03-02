@@ -18,6 +18,8 @@
   --hudTrumpOffsetY: 0px;
   --bettingModalOffsetX: 0px;
   --bettingModalOffsetY: 0px;
+  --chipWidgetOffsetX: 0px;
+  --chipWidgetOffsetY: 0px;
 }
 
 * {
@@ -176,6 +178,61 @@ body,
   font-size: 13px;
   letter-spacing: 0.08em;
   font-weight: 700;
+}
+
+.chipTotalsWidget {
+  position: absolute;
+  left: 16px;
+  top: 96px;
+  z-index: 4;
+  width: min(280px, 32vw);
+  min-width: 210px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(8, 14, 21, 0.78);
+  backdrop-filter: blur(4px);
+  padding: 8px 10px;
+  pointer-events: none;
+  transform: translate(var(--chipWidgetOffsetX), var(--chipWidgetOffsetY));
+}
+
+.chipTotalsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #f1d8a3;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.widgetDragHandle {
+  pointer-events: auto;
+  cursor: grab;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(8, 14, 21, 0.72);
+  color: #c7d7e9;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  padding: 3px 8px;
+}
+
+.widgetDragHandle.dragging {
+  cursor: grabbing;
+}
+
+#chipTotalsPot {
+  margin-top: 6px;
+  color: #f4d89e;
+}
+
+#chipTotalsList {
+  margin-top: 4px;
+  display: grid;
+  gap: 3px;
+  color: #d4deed;
 }
 
 #burnPanels {
@@ -649,6 +706,15 @@ body,
   color: #f4d49b;
 }
 
+#decorLoadText,
+#decorDebugList,
+#lightingStateText {
+  margin-top: 5px;
+  color: #a8b5c8;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
 #settingsLoadText,
 #bettingDebugText {
   margin-top: 8px;
@@ -696,6 +762,90 @@ body,
   border: 1px solid rgba(255, 227, 171, 0.34);
   background: rgba(8, 13, 20, 0.96);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.42);
+}
+
+.bottomTray {
+  position: fixed;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  width: min(980px, calc(100vw - 24px));
+  min-height: 124px;
+  max-height: min(220px, 30vh);
+  z-index: 6;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 233, 180, 0.3);
+  background: rgba(7, 12, 19, 0.9);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(6px);
+  padding: 8px 12px;
+  pointer-events: auto;
+}
+
+.bottomTrayHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bottomTrayHeader h2 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f1cc86;
+}
+
+#bidTrayStatus,
+#chipTrayBody {
+  margin-top: 3px;
+  color: #d2deef;
+}
+
+.bottomTrayRow {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.compactBidGrid {
+  grid-template-columns: repeat(13, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.compactBidGrid button {
+  min-width: 0;
+  padding: 6px 5px;
+  font-size: 12px;
+}
+
+#bidTrayPassBtn {
+  min-width: 88px;
+}
+
+.chipInputRow {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.chipStepper {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 6px;
+}
+
+.chipStepper input {
+  text-align: center;
+}
+
+#chipTrayButtons {
+  margin-top: 6px;
 }
 
 #actionModalTitle {
@@ -1043,5 +1193,36 @@ button:disabled {
 
   .burnPanelStats {
     font-size: 10px;
+  }
+
+  .compactBidGrid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .chipTotalsWidget {
+    width: min(230px, 48vw);
+    top: 84px;
+  }
+
+  .bottomTray {
+    min-height: 140px;
+    max-height: min(270px, 44vh);
+  }
+}
+
+@media (max-width: 640px) {
+  .compactBidGrid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .chipInputRow {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .chipTotalsWidget {
+    top: 74px;
+    left: 10px;
+    min-width: 176px;
   }
 }

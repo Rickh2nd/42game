@@ -89,6 +89,26 @@ function listFilesRecursive(dirPath, basePath) {
   return out.sort((a, b) => a.localeCompare(b));
 }
 
+function chooseLargestModelFile(folderPath) {
+  const relFiles = listFilesRecursive(folderPath, folderPath);
+  let best = null;
+  for (const relFile of relFiles) {
+    const low = relFile.toLowerCase();
+    if (!(low.endsWith('.glb') || low.endsWith('.gltf') || low.endsWith('.obj'))) continue;
+    const abs = path.join(folderPath, relFile);
+    let size = 0;
+    try {
+      size = fs.statSync(abs).size;
+    } catch {
+      size = 0;
+    }
+    if (!best || size > best.size) {
+      best = { relFile, size };
+    }
+  }
+  return best ? best.relFile.split(path.sep).join('/') : '';
+}
+
 app.get('/api/environment-files/:envId', (req, res) => {
   const envId = safeEnvironmentId(req.params.envId);
   if (!envId) {
@@ -104,6 +124,45 @@ app.get('/api/environment-files/:envId', (req, res) => {
   const files = listFilesRecursive(envPath, envBasePath)
     .map((relPath) => `/assets/environments/${relPath}`);
   res.status(200).json({ ok: true, files });
+});
+
+app.get('/api/shared-props', (_req, res) => {
+  const propsRoot = path.join(ROOT_DIR, 'client', 'assets', 'environments', '_shared', 'props');
+  if (!fs.existsSync(propsRoot)) {
+    res.status(200).json({
+      ok: true,
+      props: [],
+      expectedDir: 'client/assets/environments/_shared/props'
+    });
+    return;
+  }
+
+  let entries = [];
+  try {
+    entries = fs.readdirSync(propsRoot, { withFileTypes: true });
+  } catch {
+    entries = [];
+  }
+
+  const props = [];
+  for (const entry of entries) {
+    if (!entry?.isDirectory?.()) continue;
+    if (entry.name.startsWith('._') || entry.name === '.gitkeep') continue;
+    const folder = String(entry.name);
+    const folderPath = path.join(propsRoot, folder);
+    const modelRel = chooseLargestModelFile(folderPath);
+    props.push({
+      folder,
+      modelUrl: modelRel ? `/assets/environments/_shared/props/${folder}/${modelRel}` : ''
+    });
+  }
+
+  props.sort((a, b) => a.folder.localeCompare(b.folder));
+  res.status(200).json({
+    ok: true,
+    props,
+    expectedDir: 'client/assets/environments/_shared/props'
+  });
 });
 
 const httpServer = http.createServer(app);
@@ -407,6 +466,8 @@ function roomPublicSnapshot(room, viewerClientId) {
     pendingBets: room.pendingBets ? {
       amount: Number(room.pendingBets.amount || 0),
       pot: Number(room.pendingBets.pot || 0),
+      currentBid: Number(room.pendingBets.currentBid || room.pendingBets.amount || 0),
+      wagers: { ...(room.pendingBets.wagers || {}) },
       handId: Number(room.pendingBets.handId || room.bettingHandId || room.handNumber || 0),
       isOpen: !!room.pendingBets.isOpen,
       openedAtTs: Number(room.pendingBets.openedAtTs || 0),
@@ -420,6 +481,8 @@ function roomPublicSnapshot(room, viewerClientId) {
       isOpen: bettingOpen,
       betAmount: Number(room.pendingBets?.amount || room.baseBetAmount || 10),
       betPot: Number(room.pendingBets?.pot || 0),
+      currentBid: Number(room.pendingBets?.currentBid || room.pendingBets?.amount || room.baseBetAmount || 10),
+      betWagers: { ...(room.pendingBets?.wagers || {}) },
       betState: bettingResponses
     },
     burnPiles: {
@@ -850,9 +913,11 @@ function closeBettingRound(room) {
   if (!room.pendingBets) return;
   const pending = room.pendingBets;
   const responses = pending.responses || {};
+  const wagers = pending.wagers || {};
+  const currentBid = Math.max(1, Number(pending.currentBid || pending.amount || room.baseBetAmount || 10));
   for (const seatIndex of room.activeSeats || []) {
     const key = String(seatIndex);
-    if (responses[key] === 'pending') {
+    if (responses[key] === 'pending' || (responses[key] === 'called' && Number(wagers[key] || 0) < currentBid)) {
       responses[key] = 'folded';
     }
   }
@@ -866,6 +931,8 @@ function closeBettingRound(room) {
     handId: Number(pending.handId || room.bettingHandId || room.handNumber || 0),
     betAmount: Number(pending.amount || room.baseBetAmount || 10),
     betPot: Number(pending.pot || 0),
+    currentBid,
+    betWagers: { ...wagers },
     betState: { ...responses }
   };
   room.pendingBets = {
@@ -886,12 +953,16 @@ function startBettingRound(room) {
   ensureSessionBankroll(room);
   const amount = Math.max(1, Number(room.baseBetAmount || 10));
   const responses = {};
+  const wagers = {};
   for (const seatIndex of room.activeSeats || []) {
     responses[String(seatIndex)] = 'pending';
+    wagers[String(seatIndex)] = 0;
   }
   room.pendingBets = {
     amount,
+    currentBid: amount,
     pot: 0,
+    wagers,
     handId: Number(room.handNumber || 0),
     isOpen: true,
     openedAtTs: Date.now(),
@@ -925,6 +996,8 @@ function startBettingRound(room) {
       name: seatByIndex(room, seatIndex)?.name || `Seat ${seatIndex + 1}`
     })),
     betPot: 0,
+    currentBid: amount,
+    betWagers: { ...wagers },
     betState: { ...responses }
   };
   broadcastRoomEvent(room, {
@@ -935,26 +1008,75 @@ function startBettingRound(room) {
   broadcastRoom(room);
 }
 
-function resolveBettingResponse(room, seatIndex, decision) {
+function resolveBettingResponse(room, seatIndex, decision, requestedAmount = null) {
   if (room.phase !== PHASES.BETTING || !room.pendingBets) return false;
+  const pending = room.pendingBets;
   const key = String(seatIndex);
-  if (!Object.prototype.hasOwnProperty.call(room.pendingBets.responses, key)) return false;
-  if (room.pendingBets.responses[key] !== 'pending') return true;
+  if (!Object.prototype.hasOwnProperty.call(pending.responses, key)) return false;
+  if (pending.responses[key] === 'folded') return true;
 
   ensureSessionBankroll(room);
   const bankroll = Number(room.sessionBankroll[key] || 0);
-  const amount = Math.max(1, Number(room.pendingBets.amount || 10));
-  const called = decision === 'called' && bankroll >= amount;
+  const baseAmount = Math.max(1, Number(pending.amount || room.baseBetAmount || 10));
+  const currentBid = Math.max(baseAmount, Number(pending.currentBid || baseAmount));
+  const wagers = pending.wagers || {};
+  const myWager = Number(wagers[key] || 0);
+  const normalizedDecision = decision === 'raise'
+    ? 'raise'
+    : decision === 'bid'
+      ? 'bid'
+      : decision === 'call' || decision === 'called'
+        ? 'call'
+        : 'folded';
 
-  if (called) {
-    room.sessionBankroll[key] = bankroll - amount;
-    room.pendingBets.pot = Number(room.pendingBets.pot || 0) + amount;
-    room.pendingBets.responses[key] = 'called';
+  if (normalizedDecision === 'folded') {
+    pending.responses[key] = 'folded';
   } else {
-    room.pendingBets.responses[key] = 'folded';
+    let targetBid = currentBid;
+    if (normalizedDecision === 'bid' || normalizedDecision === 'raise') {
+      targetBid = Math.max(currentBid + 1, Number(requestedAmount || 0), baseAmount);
+    }
+
+    let required = Math.max(0, targetBid - myWager);
+    if (required > bankroll) {
+      if (bankroll <= 0) {
+        pending.responses[key] = 'folded';
+        required = 0;
+      } else {
+        targetBid = myWager + bankroll;
+        required = bankroll;
+      }
+    }
+
+    if (required > 0) {
+      room.sessionBankroll[key] = bankroll - required;
+      pending.pot = Number(pending.pot || 0) + required;
+      wagers[key] = myWager + required;
+    }
+
+    pending.currentBid = Math.max(currentBid, targetBid);
+    pending.wagers = wagers;
+    pending.responses[key] = 'called';
+
+    if (targetBid > currentBid) {
+      for (const activeSeat of room.activeSeats || []) {
+        const activeKey = String(activeSeat);
+        if (activeKey === key) continue;
+        if (pending.responses[activeKey] === 'folded') continue;
+        if (Number(wagers[activeKey] || 0) < targetBid) {
+          pending.responses[activeKey] = 'pending';
+        }
+      }
+    }
   }
 
-  const allResolved = Object.values(room.pendingBets.responses).every((status) => status !== 'pending');
+  const allResolved = (room.activeSeats || []).every((activeSeat) => {
+    const activeKey = String(activeSeat);
+    const status = pending.responses[activeKey];
+    if (status === 'folded') return true;
+    if (status !== 'called') return false;
+    return Number(pending.wagers?.[activeKey] || 0) >= Number(pending.currentBid || baseAmount);
+  });
   if (allResolved) {
     closeBettingRound(room);
   }
@@ -1310,19 +1432,27 @@ function scheduleCpuIfNeeded(room) {
       if (response !== 'pending') return;
 
       const amount = Math.max(1, Number(room.pendingBets.amount || room.baseBetAmount || 10));
+      const currentBid = Math.max(amount, Number(room.pendingBets.currentBid || amount));
+      const wagers = room.pendingBets.wagers || {};
+      const myWager = Number(wagers[String(pendingCpuSeat)] || 0);
       const bankroll = Number(room.sessionBankroll?.[String(pendingCpuSeat)] || 0);
       const level = Math.max(0, Math.min(4, Number(seat.cpuLevel || 1)));
-      let decision = 'called';
-      if (bankroll < amount) {
+      let decision = 'call';
+      let requestedAmount = null;
+      const needToCall = Math.max(0, currentBid - myWager);
+      if (bankroll < needToCall) {
         decision = 'folded';
       } else {
         const foldChanceByLevel = [0.42, 0.3, 0.2, 0.14, 0.08];
         if (Math.random() < foldChanceByLevel[level]) {
           decision = 'folded';
+        } else if (Math.random() < (0.08 + level * 0.04) && bankroll > needToCall + amount) {
+          decision = 'raise';
+          requestedAmount = currentBid + Math.max(1, Math.floor(amount * (0.2 + level * 0.08)));
         }
       }
 
-      resolveBettingResponse(room, pendingCpuSeat, decision);
+      resolveBettingResponse(room, pendingCpuSeat, decision, requestedAmount);
       broadcastRoom(room);
       broadcastTurnTimer(room);
       scheduleCpuIfNeeded(room);
@@ -1675,11 +1805,15 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
           type: 'betting:close',
           handId: Number(room.bettingHandId || room.handNumber || 0),
           betPot: 0,
+          currentBid: Number(room.baseBetAmount || 10),
+          betWagers: {},
           betState: {}
         });
         broadcastRoomSocketEvent(room, 'betting:close', {
           handId: Number(room.bettingHandId || room.handNumber || 0),
           betPot: 0,
+          currentBid: Number(room.baseBetAmount || 10),
+          betWagers: {},
           betState: {}
         });
         beginPlayingTricks(room);
@@ -1697,6 +1831,7 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
     room.baseBetAmount = Math.max(1, Math.min(500, Number(payload.amount) || 10));
     if (room.pendingBets) {
       room.pendingBets.amount = room.baseBetAmount;
+      room.pendingBets.currentBid = Math.max(Number(room.pendingBets.currentBid || 0), room.baseBetAmount);
     }
     broadcastRoom(room);
     return true;
@@ -1737,8 +1872,12 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
       return reject('Seat is not active this hand.');
     }
 
-    const decision = payload?.decision === 'called' ? 'called' : 'folded';
-    const applied = resolveBettingResponse(room, seatIndex, decision);
+    const requestedAmount = Number(payload?.amount || 0);
+    const decisionRaw = String(payload?.decision || '').toLowerCase();
+    const decision = ['bid', 'raise', 'call', 'called', 'folded', 'fold'].includes(decisionRaw)
+      ? decisionRaw
+      : 'folded';
+    const applied = resolveBettingResponse(room, seatIndex, decision, requestedAmount);
     if (!applied) {
       return reject('Betting response rejected.');
     }
@@ -2171,8 +2310,12 @@ io.on('connection', (socket) => {
       if (typeof ack === 'function') ack({ ok: false, message: 'Seat is not active this hand.' });
       return;
     }
-    const decision = payload?.decision === 'called' ? 'called' : 'folded';
-    const ok = resolveBettingResponse(room, seatIndex, decision);
+    const requestedAmount = Number(payload?.amount || 0);
+    const decisionRaw = String(payload?.decision || '').toLowerCase();
+    const decision = ['bid', 'raise', 'call', 'called', 'folded', 'fold'].includes(decisionRaw)
+      ? decisionRaw
+      : 'folded';
+    const ok = resolveBettingResponse(room, seatIndex, decision, requestedAmount);
     if (!ok) {
       if (typeof ack === 'function') ack({ ok: false, message: 'Betting response rejected.' });
       return;
