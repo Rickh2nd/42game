@@ -219,3 +219,33 @@ Validation:
 
 Remaining caution:
 - Visual tuning still depends on in-browser review for final subjective spacing/anchor tweaks.
+
+Update (burn scoring + action popup + played tilt pass):
+- Server scoring model updated to track per-hand trick wins and count points separately:
+  - `trickWinsThisHand` and `countPointsThisHand` added to room state/snapshots.
+  - On each completed trick, winner team now gets `+1` trick win and `+count points` from trick tiles.
+  - `pointsThisHand` is now computed as `trickWinsThisHand + countPointsThisHand` and used for target checks/hand end.
+- Shared simulation scoring aligned with new model by adding +1 trick win value in Monte Carlo trick resolution updates.
+- Burn panel header/labels cleaned:
+  - Titles changed to `TEAM 1 CAPTURED` / `TEAM 2 CAPTURED`.
+  - Stats now `Tiles | Count | Wins | Score`.
+  - Footer contributor block removed from DOM rendering (removes dark bottom rectangle clutter).
+- Added new VIEW slider for played domino tilt:
+  - `table_domino_tilt_deg` (0..35, step 0.5, default 10)
+  - persisted in localStorage and applied live.
+- Played trick domino rendering updated:
+  - row remains left-to-right in trick order
+  - each tile rotated 90° in-plane and tilted toward user based on new slider.
+- Added focused action popup for bidding/mode/trump selection (`#actionModal`):
+  - active local player sees controls
+  - others see waiting text
+  - modal auto-closes after selection.
+- Side panel auto-open behavior changed:
+  - no forced auto-open in bidding/chooseMode/chooseTrump
+  - panel auto-closes on entering these phases (manual reopen still possible via hamburger).
+
+Validation:
+- `node --check client/main.js` pass
+- `node --check server/server.js` pass
+- `node --check shared/fortyTwo.js` pass
+- local smoke: `/health` OK, `/socket.io` polling handshake OK.

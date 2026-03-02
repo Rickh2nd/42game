@@ -267,6 +267,8 @@ function createRoom(roomId, hostClientId) {
     trickHistory: [],
     played: [],
     pointsThisHand: { teamA: 0, teamB: 0 },
+    trickWinsThisHand: { teamA: 0, teamB: 0 },
+    countPointsThisHand: { teamA: 0, teamB: 0 },
     targetThisHand: { teamA: 0, teamB: 0 },
     roundWins: { teamA: 0, teamB: 0 },
     gameMarks: { teamA: 0, teamB: 0 },
@@ -388,6 +390,8 @@ function roomPublicSnapshot(room, viewerClientId) {
       tile: { ...play.tile }
     })),
     pointsThisHand: { ...room.pointsThisHand },
+    trickWinsThisHand: { ...room.trickWinsThisHand },
+    countPointsThisHand: { ...room.countPointsThisHand },
     targetThisHand: { ...room.targetThisHand },
     roundWins: { ...room.roundWins },
     gameMarks: { ...room.gameMarks },
@@ -752,6 +756,8 @@ function startNewHand(room, { resetMarks = false } = {}) {
   room.trickHistory = [];
   room.played = [];
   room.pointsThisHand = { teamA: 0, teamB: 0 };
+  room.trickWinsThisHand = { teamA: 0, teamB: 0 };
+  room.countPointsThisHand = { teamA: 0, teamB: 0 };
   room.targetThisHand = { teamA: 0, teamB: 0 };
   room.burnPiles = { teamA: [], teamB: [] };
   room.burnHandsTeamA = Array.isArray(room.burnHandsTeamA) ? room.burnHandsTeamA : [];
@@ -816,6 +822,8 @@ function enterPlayingPhase(room) {
   room.trickHistory = [];
   room.played = [];
   room.pointsThisHand = { teamA: 0, teamB: 0 };
+  room.trickWinsThisHand = { teamA: 0, teamB: 0 };
+  room.countPointsThisHand = { teamA: 0, teamB: 0 };
   room.burnPiles = { teamA: [], teamB: [] };
   room.lastBurnContributor = { teamA: 0, teamB: 1 };
   room.phase = PHASES.PLAYING;
@@ -963,8 +971,13 @@ function completeTrick(room) {
 
   const result = resolveTrick(room, room.trick);
   const winnerTeam = getTeam(result.winnerSeat);
+  room.trickWinsThisHand = room.trickWinsThisHand || { teamA: 0, teamB: 0 };
+  room.countPointsThisHand = room.countPointsThisHand || { teamA: 0, teamB: 0 };
+  room.pointsThisHand = room.pointsThisHand || { teamA: 0, teamB: 0 };
 
-  room.pointsThisHand[winnerTeam] += result.points;
+  room.trickWinsThisHand[winnerTeam] = Number(room.trickWinsThisHand?.[winnerTeam] || 0) + 1;
+  room.countPointsThisHand[winnerTeam] = Number(room.countPointsThisHand?.[winnerTeam] || 0) + Number(result.points || 0);
+  room.pointsThisHand[winnerTeam] = Number(room.trickWinsThisHand[winnerTeam] || 0) + Number(room.countPointsThisHand[winnerTeam] || 0);
   room.burnPiles[winnerTeam].push(...room.trick.map((play) => ({ ...play.tile })));
   room.lastBurnContributor[winnerTeam] = result.winnerSeat;
   room.turnSeat = result.winnerSeat;
@@ -1011,6 +1024,8 @@ function projectCpuState(room) {
     trick: room.trick,
     played: room.played,
     pointsThisHand: room.pointsThisHand,
+    trickWinsThisHand: room.trickWinsThisHand,
+    countPointsThisHand: room.countPointsThisHand,
     activeSeats: room.activeSeats,
     bidHistory: room.bidHistory,
     trickHistory: room.trickHistory

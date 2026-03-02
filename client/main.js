@@ -106,6 +106,11 @@ const avatarModalBackdrop = document.getElementById('avatarModalBackdrop');
 const closeAvatarModalBtn = document.getElementById('closeAvatarModalBtn');
 const avatarGrid = document.getElementById('avatarGrid');
 const avatarPickerStatus = document.getElementById('avatarPickerStatus');
+const actionModal = document.getElementById('actionModal');
+const actionModalTitle = document.getElementById('actionModalTitle');
+const actionModalBody = document.getElementById('actionModalBody');
+const actionModalButtons = document.getElementById('actionModalButtons');
+const actionModalModeButtons = document.getElementById('actionModalModeButtons');
 
 const scoreTeamAMain = document.getElementById('score-teamA-main');
 const scoreTeamBMain = document.getElementById('score-teamB-main');
@@ -118,14 +123,12 @@ const burnPanelDom = {
   teamA: {
     title: document.getElementById('burn-title-team1'),
     stats: document.getElementById('burn-stats-team1'),
-    stack: document.getElementById('burn-hands-team1') || document.getElementById('burn-row-team1'),
-    footer: document.getElementById('burn-footer-team1')
+    stack: document.getElementById('burn-hands-team1') || document.getElementById('burn-row-team1')
   },
   teamB: {
     title: document.getElementById('burn-title-team2'),
     stats: document.getElementById('burn-stats-team2'),
-    stack: document.getElementById('burn-hands-team2') || document.getElementById('burn-row-team2'),
-    footer: document.getElementById('burn-footer-team2')
+    stack: document.getElementById('burn-hands-team2') || document.getElementById('burn-row-team2')
   }
 };
 
@@ -142,7 +145,8 @@ const viewInputs = {
   handZ: document.getElementById('hand_z'),
   handDominoScale: document.getElementById('hand_domino_scale'),
   handDominoRotDeg: document.getElementById('hand_domino_rot_deg'),
-  tableDominoScale: document.getElementById('table_domino_scale')
+  tableDominoScale: document.getElementById('table_domino_scale'),
+  tableDominoTiltDeg: document.getElementById('table_domino_tilt_deg')
 };
 
 const viewValueLabels = {
@@ -158,7 +162,8 @@ const viewValueLabels = {
   handZ: document.getElementById('hand_z_val'),
   handDominoScale: document.getElementById('hand_domino_scale_val'),
   handDominoRotDeg: document.getElementById('hand_domino_rot_deg_val'),
-  tableDominoScale: document.getElementById('table_domino_scale_val')
+  tableDominoScale: document.getElementById('table_domino_scale_val'),
+  tableDominoTiltDeg: document.getElementById('table_domino_tilt_deg_val')
 };
 
 const sceneTuneInputs = {
@@ -378,7 +383,8 @@ const DEFAULT_VIEW_SETTINGS = {
   handZ: 0.0,
   handDominoScale: 1.0,
   handDominoRotDeg: 0,
-  tableDominoScale: 1.0
+  tableDominoScale: 1.0,
+  tableDominoTiltDeg: 10.0
 };
 
 const viewSettings = { ...DEFAULT_VIEW_SETTINGS };
@@ -620,7 +626,8 @@ function persistViewSettings() {
     handZ: Number(viewSettings.handZ),
     handDominoScale: Number(viewSettings.handDominoScale),
     handDominoRotDeg: Number(viewSettings.handDominoRotDeg),
-    tableDominoScale: Number(viewSettings.tableDominoScale)
+    tableDominoScale: Number(viewSettings.tableDominoScale),
+    tableDominoTiltDeg: Number(viewSettings.tableDominoTiltDeg)
   }));
 }
 
@@ -1237,9 +1244,6 @@ function currentTrumpLabel() {
 function shouldAutoOpenPanel() {
   if (!roomState) return true;
   if (roomState.phase === PHASES.LOBBY) return true;
-  if (localTurnToBid()) return true;
-  if (roomState.phase === PHASES.CHOOSE_MODE && localIsBidder()) return true;
-  if (roomState.phase === PHASES.CHOOSE_TRUMP && localIsBidder()) return true;
   return false;
 }
 
@@ -1251,6 +1255,7 @@ function setPanelOpen(open) {
 function updatePanelAutoBehavior() {
   if (!roomState) {
     setPanelOpen(true);
+    updateActionModal();
     return;
   }
 
@@ -1266,7 +1271,14 @@ function updatePanelAutoBehavior() {
   if (roomState.phase === PHASES.PLAYING && lastPhase !== PHASES.PLAYING) {
     setPanelOpen(false);
   }
+  if (
+    [PHASES.BIDDING, PHASES.CHOOSE_MODE, PHASES.CHOOSE_TRUMP].includes(roomState.phase)
+    && lastPhase !== roomState.phase
+  ) {
+    setPanelOpen(false);
+  }
 
+  updateActionModal();
   lastPhase = roomState.phase;
 }
 
@@ -1297,13 +1309,13 @@ function showSections() {
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
-    show.bidding = true;
+    show.room = true;
   } else if (roomState.phase === PHASES.CHOOSE_MODE || roomState.phase === PHASES.CHOOSE_TRUMP) {
     show.game = true;
     show.view = true;
     show.sceneTuning = true;
     show.debugTable = true;
-    show.trump = true;
+    show.room = true;
   } else if (roomState.phase === PHASES.PLAYING) {
     show.game = true;
     show.view = true;
@@ -1329,6 +1341,135 @@ function showSections() {
   sectionBidding.classList.toggle('hidden', !show.bidding);
   sectionTrump.classList.toggle('hidden', !show.trump);
   sectionMarks.classList.toggle('hidden', !show.marks);
+}
+
+function closeActionModal() {
+  if (!actionModal) return;
+  actionModal.classList.add('hidden');
+  actionModalButtons?.replaceChildren();
+  actionModalModeButtons?.replaceChildren();
+}
+
+function createActionButton(label, onClick, { disabled = false, className = '' } = {}) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = label;
+  btn.disabled = !!disabled;
+  if (className) btn.className = className;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function updateActionModal() {
+  if (!actionModal || !actionModalTitle || !actionModalBody || !actionModalButtons || !actionModalModeButtons) {
+    return;
+  }
+
+  if (!roomState || !isConnected()) {
+    closeActionModal();
+    return;
+  }
+
+  const phase = roomState.phase;
+  const canBidNow = localTurnToBid();
+  const canChooseMode = phase === PHASES.CHOOSE_MODE && localIsBidder();
+  const canChooseTrump = phase === PHASES.CHOOSE_TRUMP && localIsBidder() && roomState.mode === MODES.TRUMPS;
+  const shouldShow = phase === PHASES.BIDDING || phase === PHASES.CHOOSE_MODE || phase === PHASES.CHOOSE_TRUMP;
+  if (!shouldShow) {
+    closeActionModal();
+    return;
+  }
+
+  actionModal.classList.remove('hidden');
+  actionModalButtons.replaceChildren();
+  actionModalModeButtons.replaceChildren();
+
+  if (phase === PHASES.BIDDING) {
+    actionModalTitle.textContent = 'Bidding';
+    const highBid = getCurrentHighBid();
+    if (!canBidNow) {
+      actionModalBody.textContent = `Waiting for Seat ${Number(roomState.turnSeat) + 1} to bid...`;
+      return;
+    }
+
+    actionModalBody.textContent = `Your turn. Current high bid: ${highBid || 'none'}`;
+    const passBtn = createActionButton('Pass', () => {
+      pendingLocalBidChoice = 'PASS';
+      updateNameplates();
+      sendAction('submitBid', { bid: null });
+      forceClosePanel = true;
+      closeActionModal();
+      updatePanelAutoBehavior();
+    });
+    actionModalModeButtons.appendChild(passBtn);
+
+    for (let bid = 30; bid <= 42; bid += 1) {
+      const btn = createActionButton(String(bid), () => {
+        pendingLocalBidChoice = null;
+        sendAction('submitBid', { bid });
+        forceClosePanel = true;
+        closeActionModal();
+        updatePanelAutoBehavior();
+      }, {
+        disabled: bid <= highBid
+      });
+      btn.addEventListener('mouseenter', () => {
+        if (btn.disabled) return;
+        pendingLocalBidChoice = bid;
+        updateNameplates();
+      });
+      btn.addEventListener('mouseleave', () => {
+        if (pendingLocalBidChoice === bid) {
+          pendingLocalBidChoice = null;
+          updateNameplates();
+        }
+      });
+      actionModalButtons.appendChild(btn);
+    }
+    return;
+  }
+
+  if (phase === PHASES.CHOOSE_MODE) {
+    actionModalTitle.textContent = 'Choose Mode';
+    if (!canChooseMode) {
+      actionModalBody.textContent = `Waiting for Seat ${Number(roomState.bidderSeat) + 1} to choose mode...`;
+      return;
+    }
+    actionModalBody.textContent = 'Select the hand mode.';
+    const modeDefs = [
+      { id: MODES.TRUMPS, label: 'TRUMPS' },
+      { id: MODES.FOLLOW_ME, label: 'FOLLOW ME' },
+      { id: MODES.SEVENS, label: 'SEVENS' }
+    ];
+    for (const modeDef of modeDefs) {
+      const btn = createActionButton(modeDef.label, () => {
+        sendAction('chooseMode', { mode: modeDef.id });
+        forceClosePanel = true;
+        closeActionModal();
+        updatePanelAutoBehavior();
+      });
+      actionModalModeButtons.appendChild(btn);
+    }
+    return;
+  }
+
+  if (phase === PHASES.CHOOSE_TRUMP) {
+    actionModalTitle.textContent = 'Choose Trump';
+    if (!canChooseTrump) {
+      actionModalBody.textContent = `Waiting for Seat ${Number(roomState.bidderSeat) + 1} to choose trump...`;
+      return;
+    }
+    actionModalBody.textContent = 'Select trump number.';
+    for (let trump = 0; trump <= 6; trump += 1) {
+      const btn = createActionButton(String(trump), () => {
+        sendAction('chooseTrump', { trumpSuit: trump });
+        forceClosePanel = true;
+        closeActionModal();
+        updatePanelAutoBehavior();
+      });
+      actionModalButtons.appendChild(btn);
+    }
+  }
 }
 
 function renderTallies(svg, value) {
@@ -1604,33 +1745,6 @@ function buildBurnDominoTile(tile, { highlightCount = false, mode = MODES.TRUMPS
   return wrap;
 }
 
-function teamCaptainSeat(team) {
-  return team === 'teamA' ? 0 : 1;
-}
-
-function contributorForSeat(seatIndex, team) {
-  const seat = roomState?.seats?.[seatIndex];
-  if (!seat) {
-    return {
-      name: team === 'teamA' ? 'Team 1 Captain' : 'Team 2 Captain',
-      meta: `Seat ${seatIndex + 1} | CPU`
-    };
-  }
-  const typeLabel = seat.type === 'cpu' ? `CPU L${seat.cpuLevel ?? 0}` : 'Human';
-  return {
-    name: seat.name || `Seat ${seatIndex + 1}`,
-    meta: `Seat ${seatIndex + 1} | ${typeLabel}`
-  };
-}
-
-function lastContributorForTeam(team, handRecord = null) {
-  const fallbackSeat = Number.isInteger(roomState?.lastBurnContributor?.[team])
-    ? roomState.lastBurnContributor[team]
-    : teamCaptainSeat(team);
-  const seatIndex = Number.isInteger(handRecord?.winnerSeat) ? handRecord.winnerSeat : fallbackSeat;
-  return contributorForSeat(seatIndex, team);
-}
-
 function splitTilesIntoLiveTrickRows(tiles) {
   const list = Array.isArray(tiles) ? tiles : [];
   const rows = [];
@@ -1653,16 +1767,16 @@ function renderBurnPanel(team, data) {
   const panel = burnPanelDom[team];
   if (!panel || !panel.stack) return;
 
-  const titleTeam = team === 'teamA' ? 'TEAM 1 BURN PILE' : 'TEAM 2 BURN PILE';
+  const titleTeam = team === 'teamA' ? 'TEAM 1 CAPTURED' : 'TEAM 2 CAPTURED';
   const handRecords = Array.isArray(data.handRecords) ? data.handRecords : [];
   const liveTiles = Array.isArray(data.liveTiles) ? data.liveTiles : [];
   const liveRows = splitTilesIntoLiveTrickRows(liveTiles);
-  const totalTiles = liveTiles.length + handRecords.reduce((sum, record) => sum + (record.tiles?.length || 0), 0);
-  const totalCountPoints = liveTiles.reduce((sum, tile) => sum + countTilePoints(tile), 0)
-    + handRecords.reduce((sum, record) => sum + Number(record.countPoints || 0), 0);
-  const handWins = Number(data.handWins || 0);
+  const totalTiles = Number(data.tileCount || 0);
+  const totalCountPoints = Number(data.countPoints || 0);
+  const trickWins = Number(data.trickWins || 0);
+  const liveScore = trickWins + totalCountPoints;
   panel.title.textContent = titleTeam;
-  panel.stats.textContent = `Tiles: ${totalTiles} | Count pts: ${totalCountPoints} | Hand: ${handWins}`;
+  panel.stats.textContent = `Tiles: ${totalTiles} | Count: ${totalCountPoints} | Wins: ${trickWins} | Score: ${liveScore}`;
 
   panel.stack.replaceChildren();
   if (!liveRows.length && !handRecords.length) {
@@ -1706,7 +1820,7 @@ function renderBurnPanel(team, data) {
       const header = document.createElement('div');
       header.className = 'burnHandHeader';
       const handLabel = document.createElement('span');
-      handLabel.textContent = `HAND #${Number(record.handIndex || 0)}`;
+      handLabel.textContent = `LAST HAND #${Number(record.handIndex || 0)}`;
       const ptsLabel = document.createElement('span');
       ptsLabel.className = 'burnHandPts';
       ptsLabel.textContent = `+${Number(record.countPoints || 0)} pts`;
@@ -1734,33 +1848,31 @@ function renderBurnPanel(team, data) {
       panel.stack.appendChild(row);
     }
   }
-
-  const contributor = lastContributorForTeam(team, liveRows.length ? null : handRecords[0]);
-  panel.footer.innerHTML = `
-    <div class="burnFooterName">${contributor.name}</div>
-    <div class="burnFooterMeta">${contributor.meta}</div>
-  `;
 }
 
 function updateBurnPanels() {
   if (!roomState) {
-    renderBurnPanel('teamA', { liveTiles: [], handRecords: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
-    renderBurnPanel('teamB', { liveTiles: [], handRecords: [], handWins: 0, mode: MODES.TRUMPS, trumpSuit: null });
+    renderBurnPanel('teamA', { liveTiles: [], handRecords: [], trickWins: 0, countPoints: 0, mode: MODES.TRUMPS, trumpSuit: null });
+    renderBurnPanel('teamB', { liveTiles: [], handRecords: [], trickWins: 0, countPoints: 0, mode: MODES.TRUMPS, trumpSuit: null });
     return;
   }
   const showLiveHandCaptures = roomState.phase === PHASES.PLAYING || roomState.phase === PHASES.TRICK_PAUSE;
 
   renderBurnPanel('teamA', {
     liveTiles: showLiveHandCaptures ? (roomState.burnPiles?.teamA || []) : [],
+    tileCount: roomState.burnPiles?.teamA?.length || 0,
     handRecords: roomState.burnHandsTeamA || [],
-    handWins: roomState.roundWins?.teamA || 0,
+    trickWins: roomState.trickWinsThisHand?.teamA || 0,
+    countPoints: roomState.countPointsThisHand?.teamA || 0,
     mode: roomState.mode || MODES.TRUMPS,
     trumpSuit: roomState.trumpSuit
   });
   renderBurnPanel('teamB', {
     liveTiles: showLiveHandCaptures ? (roomState.burnPiles?.teamB || []) : [],
+    tileCount: roomState.burnPiles?.teamB?.length || 0,
     handRecords: roomState.burnHandsTeamB || [],
-    handWins: roomState.roundWins?.teamB || 0,
+    trickWins: roomState.trickWinsThisHand?.teamB || 0,
+    countPoints: roomState.countPointsThisHand?.teamB || 0,
     mode: roomState.mode || MODES.TRUMPS,
     trumpSuit: roomState.trumpSuit
   });
@@ -2355,6 +2467,7 @@ function sanitizeViewSettings() {
   viewSettings.handDominoScale = clampValue(Number(viewSettings.handDominoScale), 0.05, 12.0);
   viewSettings.handDominoRotDeg = clampValue(Number(viewSettings.handDominoRotDeg), -180, 180);
   viewSettings.tableDominoScale = clampValue(Number(viewSettings.tableDominoScale), 0.05, 25.0);
+  viewSettings.tableDominoTiltDeg = clampValue(Number(viewSettings.tableDominoTiltDeg), 0, 35);
 }
 
 function updateViewControlsUi() {
@@ -2372,6 +2485,8 @@ function updateViewControlsUi() {
       ? `${Math.round(viewSettings[key])}`
       : key === 'pitchDeg'
         ? `${viewSettings[key].toFixed(1)}`
+        : key === 'tableDominoTiltDeg'
+          ? `${viewSettings[key].toFixed(1)}`
         : key === 'near'
           ? `${viewSettings[key].toFixed(3)}`
         : viewSettings[key].toFixed(2);
@@ -3389,6 +3504,7 @@ function renderTableTrick(trick) {
   const spacing = Math.max(dominoWidth + gap, dominoWidth * 1.1);
   const startX = -((plays.length - 1) * spacing) * 0.5;
   const facingYaw = Math.atan2(seatBasis.forward.z, seatBasis.forward.x);
+  const tiltRad = THREE.MathUtils.degToRad(clampValue(Number(viewSettings.tableDominoTiltDeg), 0, 35, 10));
 
   for (let i = 0; i < plays.length; i += 1) {
     const play = plays[i];
@@ -3402,7 +3518,9 @@ function renderTableTrick(trick) {
       scale: tableScale
     });
     mesh.position.copy(anchor).addScaledVector(rowRight, startX + i * spacing);
-    mesh.rotation.set(0, facingYaw, 0);
+    mesh.rotation.set(0, facingYaw + (Math.PI * 0.5), 0);
+    mesh.rotateX(tiltRad);
+    mesh.position.y = Math.max(mesh.position.y, tableMetrics.topY + 0.012);
     mesh.userData.tableDomino = true;
     tablePlayRoot.add(mesh);
 
@@ -3603,7 +3721,8 @@ function setupViewControls() {
       handZ: Number(viewSettings.handZ),
       handDominoScale: Number(viewSettings.handDominoScale),
       handDominoRotDeg: Number(viewSettings.handDominoRotDeg),
-      tableDominoScale: Number(viewSettings.tableDominoScale)
+      tableDominoScale: Number(viewSettings.tableDominoScale),
+      tableDominoTiltDeg: Number(viewSettings.tableDominoTiltDeg)
     }, null, 2);
     try {
       await navigator.clipboard.writeText(payload);
@@ -3910,6 +4029,7 @@ function updateBidControls() {
   if (!roomState || roomState.phase !== PHASES.BIDDING) {
     passBtn.disabled = true;
     updateNameplates();
+    updateActionModal();
     return;
   }
 
@@ -3949,6 +4069,7 @@ function updateBidControls() {
     forceClosePanel = true;
     updatePanelAutoBehavior();
   };
+  updateActionModal();
 }
 
 function updateTrumpControls() {
@@ -3982,6 +4103,7 @@ function updateTrumpControls() {
     });
     trumpButtonsWrap.appendChild(btn);
   }
+  updateActionModal();
 }
 
 function applyStoredAvatarIfNeeded() {
@@ -4452,7 +4574,8 @@ function ensureButtons() {
       scale: Math.max(0.05, Number(viewSettings.tableDominoScale) || 1)
     });
     mesh.position.set(0, tableMetrics.topY + Math.max(0.008, DOMINO_TILE_THICKNESS * 0.8), 0);
-    mesh.rotation.y = 0;
+    mesh.rotation.set(0, Math.PI * 0.5, 0);
+    mesh.rotateX(THREE.MathUtils.degToRad(clampValue(Number(viewSettings.tableDominoTiltDeg), 0, 35, 10)));
     tablePlayRoot.add(mesh);
     if (showTableDominoBounds) {
       const helper = new THREE.BoxHelper(mesh, 0xffd777);

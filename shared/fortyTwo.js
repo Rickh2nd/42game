@@ -827,7 +827,7 @@ function simulateRandomFuture(state, seatIndex, firstTile, depth, rng) {
       const trickResult = resolveTrick(sim, sim.trick);
       if (sim.mode !== MODES.SEVENS) {
         const team = getTeam(trickResult.winnerSeat);
-        sim.pointsThisHand[team] += trickResult.points;
+        sim.pointsThisHand[team] += Number(trickResult.points || 0) + 1;
       }
       sim.trick = [];
       sim.turnSeat = sim.mode === MODES.SEVENS ? sim.bidderSeat : trickResult.winnerSeat;

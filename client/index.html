@@ -44,30 +44,22 @@
         <div id="burnPanels">
           <aside class="burnPanel burnPanelLeft" id="burnPanel-team1" aria-label="Team 1 burn pile">
             <div class="burnPanelInner">
-              <div class="burnPanelTitle" id="burn-title-team1">TEAM 1 BURN PILE</div>
-              <div class="burnPanelStats" id="burn-stats-team1">Tiles: 0 | Count pts: 0 | Hand: 0</div>
+              <div class="burnPanelTitle" id="burn-title-team1">TEAM 1 CAPTURED</div>
+              <div class="burnPanelStats" id="burn-stats-team1">Tiles: 0 | Count: 0 | Wins: 0 | Score: 0</div>
               <div class="burnRowWrap">
                 <div class="burnHandsStack" id="burn-hands-team1"></div>
                 <div class="smallText hidden" id="burn-overflow-team1"></div>
-              </div>
-              <div class="burnFooterTag" id="burn-footer-team1">
-                <div class="burnFooterName">Team 1 Captain</div>
-                <div class="burnFooterMeta">Seat 1 | Human</div>
               </div>
             </div>
           </aside>
 
           <aside class="burnPanel burnPanelRight" id="burnPanel-team2" aria-label="Team 2 burn pile">
             <div class="burnPanelInner">
-              <div class="burnPanelTitle" id="burn-title-team2">TEAM 2 BURN PILE</div>
-              <div class="burnPanelStats" id="burn-stats-team2">Tiles: 0 | Count pts: 0 | Hand: 0</div>
+              <div class="burnPanelTitle" id="burn-title-team2">TEAM 2 CAPTURED</div>
+              <div class="burnPanelStats" id="burn-stats-team2">Tiles: 0 | Count: 0 | Wins: 0 | Score: 0</div>
               <div class="burnRowWrap">
                 <div class="burnHandsStack" id="burn-hands-team2"></div>
                 <div class="smallText hidden" id="burn-overflow-team2"></div>
-              </div>
-              <div class="burnFooterTag" id="burn-footer-team2">
-                <div class="burnFooterName">Team 2 Captain</div>
-                <div class="burnFooterMeta">Seat 2 | CPU</div>
               </div>
             </div>
           </aside>
@@ -253,6 +245,11 @@
             <input id="table_domino_scale" type="range" min="0.05" max="25.00" step="0.1" />
             <span id="table_domino_scale_val" class="viewVal">1.00</span>
           </div>
+          <div class="viewControl">
+            <label for="table_domino_tilt_deg">Played Domino Tilt</label>
+            <input id="table_domino_tilt_deg" type="range" min="0" max="35" step="0.5" />
+            <span id="table_domino_tilt_deg_val" class="viewVal">10.0</span>
+          </div>
           <div class="buttonRow">
             <button id="resetViewBtn">Reset View</button>
             <button id="copyViewBtn">Copy View Settings</button>
@@ -378,6 +375,18 @@
 
         <div id="eventLog" aria-live="polite"></div>
       </aside>
+    </div>
+
+    <div id="actionModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Turn action popup">
+      <div class="modalBackdrop actionModalBackdrop"></div>
+      <div class="modalPanel actionModalPanel">
+        <div class="modalHeader">
+          <h2 id="actionModalTitle">Action</h2>
+        </div>
+        <div id="actionModalBody" class="smallText">Waiting...</div>
+        <div id="actionModalButtons" class="gridButtons"></div>
+        <div id="actionModalModeButtons" class="buttonRow"></div>
+      </div>
     </div>
 
     <div id="avatarModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Avatar picker">
