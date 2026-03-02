@@ -1,4 +1,5 @@
 [
+  { "id": "casino_lounge", "name": "Casino Lounge", "root": "/assets/environments/casino_lounge", "preview": "/assets/environments/casino_lounge/preview.svg" },
   { "id": "default_lounge", "name": "Classic Domino Lounge", "preview": "/assets/environments/default_lounge/preview.svg" },
   { "id": "witch_parlor", "name": "Witchy Parlor", "preview": "/assets/environments/witch_parlor/preview.svg" },
   { "id": "zombie_graveyard", "name": "Graveyard Fog", "preview": "/assets/environments/zombie_graveyard/preview.svg" },

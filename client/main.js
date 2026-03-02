@@ -27,9 +27,10 @@ const PHASES = {
 };
 
 const PLAY_PLANE_Y = 0.6;
-const DOMINO_LONG = 0.31;
-const DOMINO_SHORT = 0.155;
-const DOMINO_THICKNESS = 0.02;
+const DOMINO_LONG = 0.056;
+const DOMINO_SHORT = 0.029;
+const DOMINO_THICKNESS = 0.011;
+const DOMINO_TILE_THICKNESS = 0.0014;
 const DOMINO_SCALE = 1.0;
 const DOMINO_Y = PLAY_PLANE_Y + DOMINO_THICKNESS / 2;
 
@@ -134,7 +135,10 @@ const viewInputs = {
   pitchDeg: document.getElementById('view_pitch_deg'),
   near: document.getElementById('view_near'),
   handY: document.getElementById('hand_y'),
-  handZ: document.getElementById('hand_z')
+  handZ: document.getElementById('hand_z'),
+  handDominoScale: document.getElementById('hand_domino_scale'),
+  handDominoRotDeg: document.getElementById('hand_domino_rot_deg'),
+  tableDominoScale: document.getElementById('table_domino_scale')
 };
 
 const viewValueLabels = {
@@ -147,7 +151,10 @@ const viewValueLabels = {
   pitchDeg: document.getElementById('view_pitch_deg_val'),
   near: document.getElementById('view_near_val'),
   handY: document.getElementById('hand_y_val'),
-  handZ: document.getElementById('hand_z_val')
+  handZ: document.getElementById('hand_z_val'),
+  handDominoScale: document.getElementById('hand_domino_scale_val'),
+  handDominoRotDeg: document.getElementById('hand_domino_rot_deg_val'),
+  tableDominoScale: document.getElementById('table_domino_scale_val')
 };
 
 const sceneTuneInputs = {
@@ -297,7 +304,9 @@ axesHelper.position.y = PLAY_PLANE_Y;
 axesHelper.visible = false;
 scene.add(axesHelper);
 
-const dominoGeometry = new RoundedBoxGeometry(DOMINO_LONG, DOMINO_THICKNESS, DOMINO_SHORT, 4, 0.011);
+const dominoGeometry = new RoundedBoxGeometry(DOMINO_LONG, DOMINO_THICKNESS, DOMINO_SHORT, 4, 0.0035);
+const dominoTileGeometry = new THREE.PlaneGeometry(DOMINO_SHORT, DOMINO_LONG, 1, 1);
+dominoTileGeometry.rotateX(-Math.PI / 2);
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const clock = new THREE.Clock();
@@ -310,6 +319,10 @@ const textureCache = new Map();
 const modelCache = new Map();
 const activeAvatarLoadToken = new Map();
 const skyTextureCache = new Map();
+const environmentTextureCache = new Map();
+const environmentFileCatalogCache = new Map();
+const environmentHdriCache = new Map();
+const textureLoader = new THREE.TextureLoader();
 const environmentTemplates = {
   table: null,
   chair: null
@@ -340,6 +353,7 @@ const avatarById = new Map();
 const environmentCatalog = [];
 const environmentById = new Map();
 let currentEnvironmentId = null;
+let environmentApplyToken = 0;
 
 const timeoutPenaltyBySeat = new Map();
 const tempV3C = new THREE.Vector3();
@@ -355,7 +369,10 @@ const DEFAULT_VIEW_SETTINGS = {
   pitchDeg: -2.5,
   near: 0.08,
   handY: 0.02,
-  handZ: 0.0
+  handZ: 0.0,
+  handDominoScale: 1.0,
+  handDominoRotDeg: 0,
+  tableDominoScale: 1.0
 };
 
 const viewSettings = { ...DEFAULT_VIEW_SETTINGS };
@@ -592,7 +609,10 @@ function persistViewSettings() {
     pitchDeg: Number(viewSettings.pitchDeg),
     near: Number(viewSettings.near),
     handY: Number(viewSettings.handY),
-    handZ: Number(viewSettings.handZ)
+    handZ: Number(viewSettings.handZ),
+    handDominoScale: Number(viewSettings.handDominoScale),
+    handDominoRotDeg: Number(viewSettings.handDominoRotDeg),
+    tableDominoScale: Number(viewSettings.tableDominoScale)
   }));
 }
 
@@ -655,6 +675,15 @@ function currentTimerRemainingMs() {
 }
 
 const ENV_THEME_PRESETS = {
+  casino_lounge: {
+    top: '#5c4536',
+    bottom: '#1d1612',
+    key: { color: 0xffd7a1, intensity: 1.08, pos: [4.2, 7.1, 4.3] },
+    fill: { color: 0x8ea9c8, intensity: 0.24, pos: [-5.7, 5.4, -4.1] },
+    rim: { color: 0xf3be86, intensity: 0.18, pos: [0, 4.4, -7.2] },
+    ambient: { sky: 0xf0e4d1, ground: 0x2f241c, intensity: 0.46 },
+    fog: { color: '#211913', near: 26, far: 72 }
+  },
   default_lounge: {
     top: '#203546',
     bottom: '#0c1218',
@@ -852,6 +881,43 @@ const feltTexture = makeNoiseTexture(1024, (ctx, size) => {
   }
 });
 feltTexture.repeat.set(1.6, 1.6);
+
+const wallpaperTexture = makeNoiseTexture(1024, (ctx, size) => {
+  const grad = ctx.createLinearGradient(0, 0, 0, size);
+  grad.addColorStop(0, '#7a5b47');
+  grad.addColorStop(1, '#5e4638');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = 'rgba(222, 197, 147, 0.18)';
+  ctx.lineWidth = 2;
+  for (let x = 0; x <= size; x += size / 8) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, size);
+    ctx.stroke();
+  }
+  for (let i = 0; i < 1800; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const alpha = 0.02 + Math.random() * 0.05;
+    ctx.fillStyle = `rgba(26, 16, 9, ${alpha})`;
+    ctx.fillRect(x, y, 2, 2);
+  }
+});
+wallpaperTexture.repeat.set(4, 2.5);
+
+const carpetTexture = makeNoiseTexture(1024, (ctx, size) => {
+  ctx.fillStyle = '#3c2f2a';
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 12000; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const t = 65 + Math.floor(Math.random() * 40);
+    ctx.fillStyle = `rgba(${t}, ${t - 10}, ${t - 12}, ${0.08 + Math.random() * 0.16})`;
+    ctx.fillRect(x, y, 1, 1);
+  }
+});
+carpetTexture.repeat.set(9, 9);
 
 const ivoryPatternCanvas = (() => {
   const c = document.createElement('canvas');
@@ -1296,29 +1362,152 @@ function updateMarksMenu() {
   renderTallies(menuMarksTeamB, marks.teamB);
 }
 
-function drawBurnPipsHalf(ctx, value, cx, cy, color) {
-  const layout = {
+function pipPositions(value) {
+  return {
     0: [],
     1: [[0, 0]],
-    2: [[-0.18, -0.2], [0.18, 0.2]],
-    3: [[-0.18, -0.2], [0, 0], [0.18, 0.2]],
-    4: [[-0.18, -0.2], [0.18, -0.2], [-0.18, 0.2], [0.18, 0.2]],
-    5: [[-0.18, -0.2], [0.18, -0.2], [0, 0], [-0.18, 0.2], [0.18, 0.2]],
-    6: [[-0.18, -0.22], [0.18, -0.22], [-0.18, 0], [0.18, 0], [-0.18, 0.22], [0.18, 0.22]]
-  };
-  const points = layout[value] || [];
-  for (const [dx, dy] of points) {
-    const px = cx + dx * 39;
-    const py = cy + dy * 66;
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    2: [[-0.22, -0.22], [0.22, 0.22]],
+    3: [[-0.22, -0.22], [0, 0], [0.22, 0.22]],
+    4: [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]],
+    5: [[-0.22, -0.22], [0.22, -0.22], [0, 0], [-0.22, 0.22], [0.22, 0.22]],
+    6: [[-0.22, -0.27], [0.22, -0.27], [-0.22, 0], [0.22, 0], [-0.22, 0.27], [0.22, 0.27]]
+  }[value] || [];
+}
+
+function drawPipSetInCell(ctx, value, cell, color) {
+  const positions = pipPositions(value);
+  const pipRadius = Math.max(2.7, Math.min(cell.w, cell.h) * 0.08);
+  const spreadX = cell.w * 0.42;
+  const spreadY = cell.h * 0.42;
+
+  for (const [ox, oy] of positions) {
+    const px = cell.cx + (ox * spreadX);
+    const py = cell.cy + (oy * spreadY);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
     ctx.beginPath();
-    ctx.arc(px + 0.5, py + 0.8, 4.8, 0, Math.PI * 2);
+    ctx.arc(px + 0.8, py + 1.0, pipRadius + 0.6, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.arc(px, py, 4.4, 0, Math.PI * 2);
+    ctx.arc(px, py, pipRadius, 0, Math.PI * 2);
     ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = Math.max(0.8, pipRadius * 0.14);
+    ctx.beginPath();
+    ctx.arc(px - pipRadius * 0.2, py - pipRadius * 0.2, pipRadius * 0.55, Math.PI * 1.08, Math.PI * 1.78);
+    ctx.stroke();
+  }
+}
+
+function drawDominoFaceCanvas(ctx, width, height, tile, {
+  faceUp = true,
+  glowCount = false,
+  mode = MODES.TRUMPS,
+  trumpSuit = null,
+  orientation = 'landscape'
+} = {}) {
+  ctx.clearRect(0, 0, width, height);
+  if (!faceUp || !tile) {
+    const backGrad = ctx.createLinearGradient(0, 0, width, height);
+    backGrad.addColorStop(0, '#2e3e4e');
+    backGrad.addColorStop(1, '#182431');
+    ctx.fillStyle = backGrad;
+    ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = 'rgba(129, 160, 193, 0.72)';
+    ctx.lineWidth = Math.max(2, width * 0.014);
+    ctx.strokeRect(7, 7, width - 14, height - 14);
+    for (let i = 0; i < 12; i += 1) {
+      const x = 14 + ((i + 0.5) * (width - 28) / 12);
+      const y = height * 0.5 + (i % 2 === 0 ? -height * 0.08 : height * 0.08);
+      ctx.fillStyle = 'rgba(122, 151, 182, 0.35)';
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(2, width * 0.012), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    return;
+  }
+
+  const pattern = ctx.createPattern(ivoryPatternCanvas, 'repeat');
+  const baseGrad = ctx.createLinearGradient(0, 0, 0, height);
+  baseGrad.addColorStop(0, '#f3ebdd');
+  baseGrad.addColorStop(1, '#e6dac5');
+  ctx.fillStyle = baseGrad;
+  ctx.fillRect(0, 0, width, height);
+  if (pattern) {
+    ctx.globalAlpha = 0.24;
+    ctx.fillStyle = pattern;
+    ctx.fillRect(0, 0, width, height);
+    ctx.globalAlpha = 1;
+  }
+
+  const vignette = ctx.createRadialGradient(width * 0.5, height * 0.45, Math.min(width, height) * 0.15, width * 0.5, height * 0.45, Math.max(width, height) * 0.7);
+  vignette.addColorStop(0, 'rgba(255,255,255,0)');
+  vignette.addColorStop(1, 'rgba(86,64,43,0.13)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, width, height);
+
+  const border = Math.max(2.5, Math.min(width, height) * 0.022);
+  ctx.strokeStyle = '#5a4735';
+  ctx.lineWidth = border;
+  ctx.strokeRect(border, border, width - border * 2, height - border * 2);
+
+  if (glowCount) {
+    ctx.shadowColor = 'rgba(255,210,109,0.8)';
+    ctx.shadowBlur = Math.max(8, width * 0.05);
+    ctx.strokeStyle = 'rgba(255,213,112,0.95)';
+    ctx.lineWidth = Math.max(3, border * 1.35);
+    ctx.strokeRect(border, border, width - border * 2, height - border * 2);
+    ctx.shadowBlur = 0;
+  }
+
+  const pipDark = '#171513';
+  const pipMagenta = '#cf3df6';
+  const isPortrait = orientation === 'portrait';
+  const sideAColor = mode === MODES.TRUMPS && trumpSuit != null && tile.a === trumpSuit ? pipMagenta : pipDark;
+  const sideBColor = mode === MODES.TRUMPS && trumpSuit != null && tile.b === trumpSuit ? pipMagenta : pipDark;
+
+  if (isPortrait) {
+    const splitY = height * 0.5;
+    ctx.strokeStyle = '#5f4a37';
+    ctx.lineWidth = Math.max(2, border * 0.75);
+    ctx.beginPath();
+    ctx.moveTo(border + 2, splitY);
+    ctx.lineTo(width - border - 2, splitY);
+    ctx.stroke();
+    drawPipSetInCell(ctx, tile.a, {
+      cx: width * 0.5,
+      cy: height * 0.25,
+      w: width * 0.68,
+      h: height * 0.36
+    }, sideAColor);
+    drawPipSetInCell(ctx, tile.b, {
+      cx: width * 0.5,
+      cy: height * 0.75,
+      w: width * 0.68,
+      h: height * 0.36
+    }, sideBColor);
+  } else {
+    const splitX = width * 0.5;
+    ctx.strokeStyle = '#5f4a37';
+    ctx.lineWidth = Math.max(2, border * 0.75);
+    ctx.beginPath();
+    ctx.moveTo(splitX, border + 2);
+    ctx.lineTo(splitX, height - border - 2);
+    ctx.stroke();
+    drawPipSetInCell(ctx, tile.a, {
+      cx: width * 0.25,
+      cy: height * 0.5,
+      w: width * 0.34,
+      h: height * 0.7
+    }, sideAColor);
+    drawPipSetInCell(ctx, tile.b, {
+      cx: width * 0.75,
+      cy: height * 0.5,
+      w: width * 0.34,
+      h: height * 0.7
+    }, sideBColor);
   }
 }
 
@@ -1327,43 +1516,16 @@ function buildBurnDominoTile(tile, { highlightCount = false, mode = MODES.TRUMPS
   wrap.className = `burnDominoTile${highlightCount ? ' countTile' : ''}`;
   const canvasEl = document.createElement('canvas');
   canvasEl.className = 'burnDominoCanvas';
-  canvasEl.width = 88;
-  canvasEl.height = 156;
+  canvasEl.width = 220;
+  canvasEl.height = 396;
   const ctx = canvasEl.getContext('2d');
-  const scaleX = canvasEl.width / 124;
-  const scaleY = canvasEl.height / 220;
-  ctx.save();
-  ctx.scale(scaleX, scaleY);
-
-  const pattern = ctx.createPattern(ivoryPatternCanvas, 'repeat');
-  ctx.fillStyle = pattern || '#eee1ca';
-  ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
-
-  const edgeShade = ctx.createLinearGradient(0, 0, canvasEl.width, 0);
-  edgeShade.addColorStop(0, 'rgba(100,76,48,0.12)');
-  edgeShade.addColorStop(0.08, 'rgba(255,255,255,0)');
-  edgeShade.addColorStop(0.92, 'rgba(255,255,255,0)');
-  edgeShade.addColorStop(1, 'rgba(100,76,48,0.12)');
-  ctx.fillStyle = edgeShade;
-  ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
-
-  ctx.strokeStyle = '#60472f';
-  ctx.lineWidth = 4.5;
-  ctx.strokeRect(4, 4, canvasEl.width - 8, canvasEl.height - 8);
-
-  ctx.strokeStyle = '#5a4731';
-  ctx.lineWidth = 3.4;
-  ctx.beginPath();
-  ctx.moveTo(8, 110);
-  ctx.lineTo(116, 110);
-  ctx.stroke();
-
-  const topColor = mode === MODES.TRUMPS && trumpSuit != null && tile.a === trumpSuit ? '#cf3df6' : '#151311';
-  const bottomColor = mode === MODES.TRUMPS && trumpSuit != null && tile.b === trumpSuit ? '#cf3df6' : '#151311';
-  drawBurnPipsHalf(ctx, tile.a, 62, 56, topColor);
-  drawBurnPipsHalf(ctx, tile.b, 62, 165, bottomColor);
-  ctx.restore();
-
+  drawDominoFaceCanvas(ctx, canvasEl.width, canvasEl.height, tile, {
+    faceUp: true,
+    glowCount: highlightCount,
+    mode,
+    trumpSuit,
+    orientation: 'portrait'
+  });
   wrap.appendChild(canvasEl);
   return wrap;
 }
@@ -1518,110 +1680,35 @@ function updateBurnPanels() {
   });
 }
 
-function drawPips(ctx, value, xCenter, color) {
-  const layout = {
-    0: [],
-    1: [[0, 0]],
-    2: [[-0.18, -0.2], [0.18, 0.2]],
-    3: [[-0.18, -0.2], [0, 0], [0.18, 0.2]],
-    4: [[-0.18, -0.2], [0.18, -0.2], [-0.18, 0.2], [0.18, 0.2]],
-    5: [[-0.18, -0.2], [0.18, -0.2], [0, 0], [-0.18, 0.2], [0.18, 0.2]],
-    6: [[-0.18, -0.22], [0.18, -0.22], [-0.18, 0], [0.18, 0], [-0.18, 0.22], [0.18, 0.22]]
-  };
-
-  const positions = layout[value] || [];
-  for (const [x, y] of positions) {
-    const px = xCenter + x * 185;
-    const py = 128 + y * 205;
-
-    // Slightly inset-look pips with micro highlights.
-    ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    ctx.beginPath();
-    ctx.arc(px + 0.7, py + 0.9, 13.2, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(px, py, 12.2, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(px - 1.6, py - 1.2, 7.5, Math.PI * 1.1, Math.PI * 1.8);
-    ctx.stroke();
-  }
-}
-
 function getDominoTexture(tile, options = {}) {
   const {
     faceUp = true,
-    pipColor = '#111111',
     glowCount = false,
-    trumpSuit = null
+    trumpSuit = null,
+    mode = MODES.TRUMPS,
+    orientation = 'landscape'
   } = options;
 
   const id = tile ? tile.id || tileId(tile) : 'back';
-  const key = `${id}:${faceUp ? 'up' : 'down'}:${pipColor}:${glowCount ? 1 : 0}:t${trumpSuit == null ? 'n' : trumpSuit}`;
+  const key = `${id}:${faceUp ? 'up' : 'down'}:${orientation}:${glowCount ? 1 : 0}:m${mode}:t${trumpSuit == null ? 'n' : trumpSuit}`;
   if (textureCache.has(key)) return textureCache.get(key);
 
   const c = document.createElement('canvas');
-  c.width = 512;
-  c.height = 256;
-  const ctx = c.getContext('2d');
-
-  if (!faceUp) {
-    ctx.fillStyle = '#253342';
-    ctx.fillRect(0, 0, c.width, c.height);
-    ctx.strokeStyle = '#4a5f73';
-    ctx.lineWidth = 8;
-    ctx.strokeRect(12, 12, c.width - 24, c.height - 24);
-    ctx.fillStyle = '#3d5266';
-    for (let i = 0; i < 12; i += 1) {
-      ctx.beginPath();
-      ctx.arc(40 + i * 40, 128 + (i % 2 === 0 ? -18 : 18), 6, 0, Math.PI * 2);
-      ctx.fill();
-    }
+  if (orientation === 'portrait') {
+    c.width = 384;
+    c.height = 768;
   } else {
-    const ivoryPattern = ctx.createPattern(ivoryPatternCanvas, 'repeat');
-    ctx.fillStyle = ivoryPattern || '#efe5d3';
-    ctx.fillRect(0, 0, c.width, c.height);
-
-    const edgeFade = ctx.createLinearGradient(0, 0, 512, 0);
-    edgeFade.addColorStop(0, 'rgba(99, 79, 58, 0.1)');
-    edgeFade.addColorStop(0.1, 'rgba(255,255,255,0)');
-    edgeFade.addColorStop(0.9, 'rgba(255,255,255,0)');
-    edgeFade.addColorStop(1, 'rgba(99, 79, 58, 0.1)');
-    ctx.fillStyle = edgeFade;
-    ctx.fillRect(0, 0, c.width, c.height);
-
-    ctx.strokeStyle = '#5a4632';
-    ctx.lineWidth = 7.5;
-    ctx.strokeRect(8, 8, c.width - 16, c.height - 16);
-
-    if (glowCount) {
-      ctx.shadowColor = 'rgba(255, 212, 98, 0.9)';
-      ctx.shadowBlur = 26;
-      ctx.strokeStyle = 'rgba(255, 214, 104, 0.95)';
-      ctx.lineWidth = 12;
-      ctx.strokeRect(8, 8, c.width - 16, c.height - 16);
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = 'rgba(255, 214, 97, 0.22)';
-      ctx.fillRect(0, 0, c.width, c.height);
-    }
-
-    ctx.strokeStyle = '#5c4a39';
-    ctx.lineWidth = 6;
-    ctx.beginPath();
-    ctx.moveTo(256, 12);
-    ctx.lineTo(256, 244);
-    ctx.stroke();
-
-    const leftColor = trumpSuit != null && tile.a === trumpSuit ? '#cf3df6' : '#141311';
-    const rightColor = trumpSuit != null && tile.b === trumpSuit ? '#cf3df6' : '#141311';
-    drawPips(ctx, tile.a, 128, leftColor);
-    drawPips(ctx, tile.b, 384, rightColor);
+    c.width = 768;
+    c.height = 384;
   }
+  const ctx = c.getContext('2d');
+  drawDominoFaceCanvas(ctx, c.width, c.height, tile, {
+    faceUp,
+    glowCount,
+    mode,
+    trumpSuit,
+    orientation
+  });
 
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -1631,12 +1718,13 @@ function getDominoTexture(tile, options = {}) {
   return tex;
 }
 
-function getDominoBaseMaterial({ faceUp, map = null } = {}) {
+function getDominoBaseMaterial({ faceUp, map = null, flat = false } = {}) {
   return new THREE.MeshStandardMaterial({
     map: map || null,
     color: faceUp ? 0xf4efe4 : 0xe5dece,
     metalness: 0.0,
-    roughness: faceUp ? 0.43 : 0.5
+    roughness: faceUp ? (flat ? 0.38 : 0.43) : 0.5,
+    side: flat ? THREE.DoubleSide : THREE.FrontSide
   });
 }
 
@@ -1648,7 +1736,7 @@ function getDominoPipMaterial(faceUp) {
   });
 }
 
-function createDominoMesh(tile, options = {}) {
+function createDomino3D(tile, options = {}) {
   const {
     faceUp = true,
     scale = DOMINO_SCALE,
@@ -1660,15 +1748,16 @@ function createDominoMesh(tile, options = {}) {
   const trumpTintSuit = useMagentaTrump && trumpSuit != null ? trumpSuit : null;
   const topTexture = getDominoTexture(tile, {
     faceUp,
-    pipColor: '#121212',
     glowCount,
-    trumpSuit: trumpTintSuit
+    trumpSuit: trumpTintSuit,
+    mode: MODES.TRUMPS,
+    orientation: 'landscape'
   });
   const bottomTexture = getDominoTexture(tile, {
     faceUp: false,
-    pipColor: '#111',
     glowCount: false,
-    trumpSuit: null
+    trumpSuit: null,
+    orientation: 'landscape'
   });
 
   const sideMat = getDominoPipMaterial(faceUp);
@@ -1691,6 +1780,46 @@ function createDominoMesh(tile, options = {}) {
   return mesh;
 }
 
+function createDominoTile(tile, options = {}) {
+  const {
+    faceUp = true,
+    scale = 1,
+    glowCount = false,
+    trumpSuit = null,
+    useMagentaTrump = false
+  } = options;
+  const trumpTintSuit = useMagentaTrump && trumpSuit != null ? trumpSuit : null;
+  const texture = getDominoTexture(tile, {
+    faceUp,
+    glowCount,
+    trumpSuit: trumpTintSuit,
+    mode: MODES.TRUMPS,
+    orientation: 'portrait'
+  });
+
+  const material = getDominoBaseMaterial({ faceUp, map: texture, flat: true });
+  material.transparent = true;
+  material.alphaTest = 0.02;
+
+  const mesh = new THREE.Mesh(dominoTileGeometry, material);
+  mesh.castShadow = false;
+  mesh.receiveShadow = true;
+  mesh.scale.setScalar(scale);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 11;
+  mesh.userData = {
+    tileId: tile.id || tileId(tile),
+    seatIndex: null,
+    clickable: false,
+    isFlatTile: true
+  };
+  return mesh;
+}
+
+function createDominoMesh(tile, options = {}) {
+  return createDomino3D(tile, options);
+}
+
 function clearGroup(group) {
   const children = [...group.children];
   for (const child of children) {
@@ -1698,7 +1827,7 @@ function clearGroup(group) {
       clearGroup(child);
     }
     group.remove(child);
-    if (child.geometry && child.geometry !== dominoGeometry) {
+    if (child.geometry && child.geometry !== dominoGeometry && child.geometry !== dominoTileGeometry) {
       child.geometry.dispose();
     }
     if (Array.isArray(child.material)) {
@@ -2109,29 +2238,34 @@ function updateSeatTransforms() {
   updatePenaltyEmojiPositions();
 }
 
-function clampValue(value, min, max) {
-  return Math.max(min, Math.min(max, value));
+function clampValue(value, min, max, fallback = min) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(min, Math.min(max, numeric));
 }
 
 function lookAtBounds() {
   return {
-    min: 0.2,
-    max: 3.0
+    min: -1.0,
+    max: 6.0
   };
 }
 
 function sanitizeViewSettings() {
   const lookBounds = lookAtBounds();
-  viewSettings.distance = clampValue(Number(viewSettings.distance), 0.25, 4.5);
-  viewSettings.height = clampValue(Number(viewSettings.height), 0.4, 3.0);
-  viewSettings.forward = clampValue(Number(viewSettings.forward), -1.5, 1.5);
-  viewSettings.shoulder = clampValue(Number(viewSettings.shoulder), -1.25, 1.25);
+  viewSettings.distance = clampValue(Number(viewSettings.distance), 0.1, 8.0);
+  viewSettings.height = clampValue(Number(viewSettings.height), 0.1, 6.0);
+  viewSettings.forward = clampValue(Number(viewSettings.forward), -4.0, 4.0);
+  viewSettings.shoulder = clampValue(Number(viewSettings.shoulder), -4.0, 4.0);
   viewSettings.lookAtY = clampValue(Number(viewSettings.lookAtY), lookBounds.min, lookBounds.max);
-  viewSettings.fov = clampValue(Number(viewSettings.fov), 25, 100);
-  viewSettings.pitchDeg = clampValue(Number(viewSettings.pitchDeg), -45, 45);
-  viewSettings.near = clampValue(Number(viewSettings.near), 0.005, 0.5);
-  viewSettings.handY = clampValue(Number(viewSettings.handY), -0.2, 0.4);
-  viewSettings.handZ = clampValue(Number(viewSettings.handZ), -1.0, 1.0);
+  viewSettings.fov = clampValue(Number(viewSettings.fov), 15, 120);
+  viewSettings.pitchDeg = clampValue(Number(viewSettings.pitchDeg), -80, 80);
+  viewSettings.near = clampValue(Number(viewSettings.near), 0.001, 1.0);
+  viewSettings.handY = clampValue(Number(viewSettings.handY), -1.0, 1.0);
+  viewSettings.handZ = clampValue(Number(viewSettings.handZ), -4.0, 4.0);
+  viewSettings.handDominoScale = clampValue(Number(viewSettings.handDominoScale), 0.2, 3.0);
+  viewSettings.handDominoRotDeg = clampValue(Number(viewSettings.handDominoRotDeg), -180, 180);
+  viewSettings.tableDominoScale = clampValue(Number(viewSettings.tableDominoScale), 0.2, 3.0);
 }
 
 function updateViewControlsUi() {
@@ -2145,7 +2279,7 @@ function updateViewControlsUi() {
     const label = viewValueLabels[key];
     if (!input || !label) continue;
     input.value = `${viewSettings[key]}`;
-    label.textContent = key === 'fov'
+    label.textContent = key === 'fov' || key === 'handDominoRotDeg'
       ? `${Math.round(viewSettings[key])}`
       : key === 'pitchDeg'
         ? `${viewSettings[key].toFixed(1)}`
@@ -2445,21 +2579,312 @@ function makeCandle(x, z, colorHex) {
   return g;
 }
 
+function environmentRootFor(entry) {
+  if (entry?.root && typeof entry.root === 'string') {
+    return entry.root.replace(/\/$/, '');
+  }
+  return `/assets/environments/${entry?.id || 'default_lounge'}`;
+}
+
+async function fetchEnvironmentFiles(entry) {
+  const envId = String(entry?.id || '').trim();
+  if (!envId) return [];
+  if (environmentFileCatalogCache.has(envId)) {
+    return environmentFileCatalogCache.get(envId);
+  }
+
+  const task = (async () => {
+    try {
+      const res = await fetch(`/api/environment-files/${encodeURIComponent(envId)}`, { cache: 'no-cache' });
+      if (!res.ok) return [];
+      const data = await res.json();
+      if (!Array.isArray(data?.files)) return [];
+      return data.files
+        .filter((file) => typeof file === 'string' && !file.includes('/._'))
+        .map((file) => file.trim())
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  })();
+
+  environmentFileCatalogCache.set(envId, task);
+  return task;
+}
+
+function findTextureFile(files, { dirHint, tags = [] }) {
+  const lowerTags = tags.map((tag) => tag.toLowerCase());
+  const candidates = files.filter((file) => {
+    const low = file.toLowerCase();
+    if (!(low.endsWith('.png') || low.endsWith('.jpg') || low.endsWith('.jpeg') || low.endsWith('.webp'))) return false;
+    if (dirHint && !low.includes(dirHint.toLowerCase())) return false;
+    return true;
+  });
+
+  for (const file of candidates) {
+    const low = file.toLowerCase();
+    if (lowerTags.some((tag) => low.includes(tag))) return file;
+  }
+  return candidates[0] || '';
+}
+
+function mapCasinoLoungeAssets(files) {
+  const floorDir = '/materials/floor/';
+  const wallDir = '/materials/walls/';
+  const trimDir = '/materials/trim/';
+  const baseTags = ['basecolor', 'base_color', 'albedo', 'diffuse', 'color'];
+  const normalTags = ['normal', '_nrm', '_n'];
+  const roughTags = ['roughness', 'rough'];
+  const aoTags = ['ambientocclusion', 'ambient_occlusion', 'ao'];
+
+  const hdri = files.find((file) => file.toLowerCase().includes('/hdri/') && file.toLowerCase().endsWith('.hdr')) || '';
+  const props = files.filter((file) => {
+    const low = file.toLowerCase();
+    return low.includes('/props/') && (low.endsWith('.glb') || low.endsWith('.gltf') || low.endsWith('.obj'));
+  });
+
+  return {
+    floor: {
+      base: findTextureFile(files, { dirHint: floorDir, tags: baseTags }),
+      normal: findTextureFile(files, { dirHint: floorDir, tags: normalTags }),
+      roughness: findTextureFile(files, { dirHint: floorDir, tags: roughTags }),
+      ao: findTextureFile(files, { dirHint: floorDir, tags: aoTags })
+    },
+    walls: {
+      base: findTextureFile(files, { dirHint: wallDir, tags: baseTags }),
+      normal: findTextureFile(files, { dirHint: wallDir, tags: normalTags }),
+      roughness: findTextureFile(files, { dirHint: wallDir, tags: roughTags }),
+      ao: findTextureFile(files, { dirHint: wallDir, tags: aoTags })
+    },
+    trim: {
+      base: findTextureFile(files, { dirHint: trimDir, tags: baseTags }),
+      normal: findTextureFile(files, { dirHint: trimDir, tags: normalTags }),
+      roughness: findTextureFile(files, { dirHint: trimDir, tags: roughTags }),
+      ao: findTextureFile(files, { dirHint: trimDir, tags: aoTags })
+    },
+    hdri,
+    props
+  };
+}
+
+async function loadEnvironmentTexture(url, { srgb = true, repeat = [1, 1] } = {}) {
+  if (!url) return null;
+  const key = `${url}|${srgb ? 's' : 'l'}|${repeat[0]}|${repeat[1]}`;
+  if (environmentTextureCache.has(key)) {
+    return environmentTextureCache.get(key);
+  }
+
+  const task = new Promise((resolve) => {
+    textureLoader.load(
+      url,
+      (tex) => {
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(repeat[0], repeat[1]);
+        tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        tex.needsUpdate = true;
+        resolve(tex);
+      },
+      undefined,
+      () => resolve(null)
+    );
+  });
+
+  environmentTextureCache.set(key, task);
+  return task;
+}
+
+async function loadEnvironmentHdri(url) {
+  if (!url) return null;
+  if (environmentHdriCache.has(url)) {
+    return environmentHdriCache.get(url);
+  }
+
+  const task = (async () => {
+    try {
+      const tex = await new RGBELoader().loadAsync(url);
+      const pmrem = pmremGenerator.fromEquirectangular(tex).texture;
+      tex.dispose();
+      return pmrem;
+    } catch {
+      return null;
+    }
+  })();
+  environmentHdriCache.set(url, task);
+  return task;
+}
+
+function addCasinoTrim(roomRoot, roomWidth, roomDepth, wallHeight, material) {
+  const trimHeight = 0.16;
+  const trimDepth = 0.06;
+  const zBack = -(roomDepth * 0.5) + (trimDepth * 0.5);
+  const xLeft = -(roomWidth * 0.5) + (trimDepth * 0.5);
+  const xRight = (roomWidth * 0.5) - (trimDepth * 0.5);
+  const y = trimHeight * 0.5;
+
+  const backTrim = new THREE.Mesh(new THREE.BoxGeometry(roomWidth, trimHeight, trimDepth), material);
+  backTrim.position.set(0, y, zBack);
+  backTrim.receiveShadow = true;
+  backTrim.castShadow = true;
+  roomRoot.add(backTrim);
+
+  const leftTrim = new THREE.Mesh(new THREE.BoxGeometry(trimDepth, trimHeight, roomDepth), material);
+  leftTrim.position.set(xLeft, y, 0);
+  leftTrim.receiveShadow = true;
+  leftTrim.castShadow = true;
+  roomRoot.add(leftTrim);
+
+  const rightTrim = leftTrim.clone();
+  rightTrim.position.x = xRight;
+  roomRoot.add(rightTrim);
+}
+
+async function buildCasinoLoungeEnvironment(entry, token) {
+  const roomRoot = new THREE.Group();
+  roomRoot.name = 'casinoRoomRoot';
+  roomRoot.position.set(0, -0.02, 0);
+
+  const roomWidth = 18;
+  const roomDepth = 20;
+  const wallHeight = 5.2;
+
+  const floorMaterial = new THREE.MeshStandardMaterial({
+    map: carpetTexture,
+    color: 0xffffff,
+    roughness: 0.94,
+    metalness: 0.0
+  });
+  const wallMaterial = new THREE.MeshStandardMaterial({
+    map: wallpaperTexture,
+    color: 0xffffff,
+    roughness: 0.86,
+    metalness: 0.0
+  });
+  const trimMaterial = new THREE.MeshStandardMaterial({
+    map: woodTexture,
+    color: 0xffffff,
+    roughness: 0.58,
+    metalness: 0.0
+  });
+
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, roomDepth), floorMaterial);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
+  floor.receiveShadow = true;
+  floor.castShadow = false;
+  roomRoot.add(floor);
+
+  const backWall = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, wallHeight), wallMaterial);
+  backWall.position.set(0, wallHeight * 0.5, -(roomDepth * 0.5));
+  backWall.receiveShadow = true;
+  backWall.castShadow = false;
+  roomRoot.add(backWall);
+
+  const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(roomDepth, wallHeight), wallMaterial);
+  leftWall.position.set(-(roomWidth * 0.5), wallHeight * 0.5, 0);
+  leftWall.rotation.y = Math.PI / 2;
+  leftWall.receiveShadow = true;
+  leftWall.castShadow = false;
+  roomRoot.add(leftWall);
+
+  const rightWall = leftWall.clone();
+  rightWall.position.x = roomWidth * 0.5;
+  rightWall.rotation.y = -Math.PI / 2;
+  roomRoot.add(rightWall);
+
+  const ceiling = new THREE.Mesh(
+    new THREE.PlaneGeometry(roomWidth, roomDepth),
+    new THREE.MeshStandardMaterial({ color: 0x2a211b, roughness: 0.9, metalness: 0.0 })
+  );
+  ceiling.rotation.x = Math.PI / 2;
+  ceiling.position.y = wallHeight;
+  roomRoot.add(ceiling);
+
+  addCasinoTrim(roomRoot, roomWidth, roomDepth, wallHeight, trimMaterial);
+  themeGroup.add(roomRoot);
+
+  const catalog = await fetchEnvironmentFiles(entry);
+  if (token !== environmentApplyToken) return;
+  const mapped = mapCasinoLoungeAssets(catalog);
+
+  const [floorBase, floorNormal, floorRough, wallBase, wallNormal, wallRough, trimBase, trimNormal, trimRough] = await Promise.all([
+    loadEnvironmentTexture(mapped.floor.base, { srgb: true, repeat: [10, 12] }),
+    loadEnvironmentTexture(mapped.floor.normal, { srgb: false, repeat: [10, 12] }),
+    loadEnvironmentTexture(mapped.floor.roughness, { srgb: false, repeat: [10, 12] }),
+    loadEnvironmentTexture(mapped.walls.base, { srgb: true, repeat: [4, 3] }),
+    loadEnvironmentTexture(mapped.walls.normal, { srgb: false, repeat: [4, 3] }),
+    loadEnvironmentTexture(mapped.walls.roughness, { srgb: false, repeat: [4, 3] }),
+    loadEnvironmentTexture(mapped.trim.base, { srgb: true, repeat: [7, 2] }),
+    loadEnvironmentTexture(mapped.trim.normal, { srgb: false, repeat: [7, 2] }),
+    loadEnvironmentTexture(mapped.trim.roughness, { srgb: false, repeat: [7, 2] })
+  ]);
+
+  if (token !== environmentApplyToken) return;
+
+  if (floorBase) floorMaterial.map = floorBase;
+  if (floorNormal) floorMaterial.normalMap = floorNormal;
+  if (floorRough) floorMaterial.roughnessMap = floorRough;
+  floorMaterial.needsUpdate = true;
+
+  if (wallBase) wallMaterial.map = wallBase;
+  if (wallNormal) wallMaterial.normalMap = wallNormal;
+  if (wallRough) wallMaterial.roughnessMap = wallRough;
+  wallMaterial.needsUpdate = true;
+
+  if (trimBase) trimMaterial.map = trimBase;
+  if (trimNormal) trimMaterial.normalMap = trimNormal;
+  if (trimRough) trimMaterial.roughnessMap = trimRough;
+  trimMaterial.needsUpdate = true;
+
+  if (mapped.hdri) {
+    const hdriTex = await loadEnvironmentHdri(mapped.hdri);
+    if (token !== environmentApplyToken) return;
+    if (hdriTex) {
+      scene.environment = hdriTex;
+    }
+  }
+
+  if (mapped.props.length) {
+    const propSlots = [
+      { pos: [-6.6, 0, -8.6], rotY: Math.PI * 0.2, scale: 0.9 },
+      { pos: [6.5, 0, -8.9], rotY: -Math.PI * 0.18, scale: 0.9 },
+      { pos: [-6.7, 0, -2.7], rotY: Math.PI * 0.45, scale: 0.85 },
+      { pos: [6.6, 0, -2.8], rotY: -Math.PI * 0.45, scale: 0.85 }
+    ];
+
+    const propUrls = mapped.props.slice(0, propSlots.length);
+    for (let i = 0; i < propUrls.length; i += 1) {
+      const url = propUrls[i];
+      try {
+        const template = await loadModelTemplate(url);
+        if (token !== environmentApplyToken) return;
+        const clone = clonedModelAsset(template).scene;
+        tuneImportedMaterials(clone);
+        const slot = propSlots[i];
+        clone.position.set(slot.pos[0], slot.pos[1], slot.pos[2]);
+        clone.rotation.y = slot.rotY;
+        clone.scale.setScalar(slot.scale);
+        roomRoot.add(clone);
+      } catch {
+        // Optional props are best-effort.
+      }
+    }
+  }
+
+  if (token !== environmentApplyToken) return;
+}
+
 function applyEnvironment(environmentId) {
   const safeId = environmentById.has(environmentId) ? environmentId : 'default_lounge';
   if (currentEnvironmentId === safeId) return;
   currentEnvironmentId = safeId;
+  environmentApplyToken += 1;
+  const token = environmentApplyToken;
 
   clearGroup(themeGroup);
   const preset = getThemePreset(safeId);
-
-  const skyTex = getSkyTexture(safeId, preset.top, preset.bottom);
-  const skyDome = new THREE.Mesh(
-    new THREE.SphereGeometry(56, 36, 20),
-    new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, depthWrite: false })
-  );
-  themeGroup.add(skyDome);
-  scene.background = new THREE.Color(preset.bottom);
+  const entry = environmentById.get(safeId) || { id: safeId, name: safeId, root: `/assets/environments/${safeId}` };
 
   ambient.color.setHex(preset.ambient.sky);
   ambient.groundColor.setHex(preset.ambient.ground);
@@ -2478,6 +2903,32 @@ function applyEnvironment(environmentId) {
   rimLight.position.set(...preset.rim.pos);
 
   scene.fog = new THREE.Fog(preset.fog.color, preset.fog.near, preset.fog.far);
+
+  if (safeId === 'casino_lounge') {
+    scene.background = new THREE.Color(0x1c1512);
+    void buildCasinoLoungeEnvironment({
+      ...entry,
+      root: environmentRootFor(entry)
+    }, token).catch(() => {
+      if (token !== environmentApplyToken) return;
+      const fallbackSky = getSkyTexture('casino_lounge-fallback', '#4e3b2e', '#17110d');
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(56, 36, 20),
+        new THREE.MeshBasicMaterial({ map: fallbackSky, side: THREE.BackSide, depthWrite: false })
+      );
+      themeGroup.add(dome);
+    });
+    updateEnvironmentControls();
+    return;
+  }
+
+  const skyTex = getSkyTexture(safeId, preset.top, preset.bottom);
+  const skyDome = new THREE.Mesh(
+    new THREE.SphereGeometry(56, 36, 20),
+    new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, depthWrite: false })
+  );
+  themeGroup.add(skyDome);
+  scene.background = new THREE.Color(preset.bottom);
 
   const backgroundStage = new THREE.Group();
   const backPanel = new THREE.Mesh(
@@ -2669,21 +3120,23 @@ function layoutPlayerHandDominos(seatId, dominos, settings) {
 
   base.y = Math.max(base.y, tableMetrics.topY + 0.03);
 
+  const handScale = Number(settings.handDominoScale) || 1;
+  const handRotateRad = THREE.MathUtils.degToRad(Number(settings.handDominoRotDeg) || 0);
   const n = dominos.length;
-  const dominoWidth = DOMINO_SHORT * DOMINO_SCALE;
-  const baseSpacing = dominoWidth + 0.01;
+  const dominoWidth = DOMINO_SHORT * handScale;
+  const baseSpacing = dominoWidth + 0.008;
   let spacing = Math.max(baseSpacing, dominoWidth * 1.1);
   let arcStrength = 0.16;
-  const liftY = 0.024;
-  const pitch = THREE.MathUtils.degToRad(16);
+  const liftY = 0.016 + DOMINO_TILE_THICKNESS;
+  const pitch = THREE.MathUtils.degToRad(14);
   const baseRot = Math.atan2(basis.forward.z, basis.forward.x);
   const meshes = [];
 
   for (const tile of dominos) {
-    const mesh = createDominoMesh(tile, {
+    const mesh = createDominoTile(tile, {
       faceUp: true,
       glowCount: countTilePoints(tile) > 0,
-      scale: DOMINO_SCALE
+      scale: handScale
     });
     mesh.userData.tileId = tile.id;
     mesh.userData.seatIndex = seatId;
@@ -2705,7 +3158,7 @@ function layoutPlayerHandDominos(seatId, dominos, settings) {
         .addScaledVector(basis.right, x)
         .addScaledVector(basis.forward, yArc)
         .addScaledVector(basis.up, liftY);
-      mesh.rotation.set(0, baseRot, 0);
+      mesh.rotation.set(0, baseRot + handRotateRad, 0);
       mesh.rotateX(pitch);
       mesh.rotateY(t * 0.024);
       mesh.userData.baseY = mesh.position.y;
@@ -2737,7 +3190,7 @@ function layoutPlayerHandDominos(seatId, dominos, settings) {
     if (!overflowX && !overflowBottom && !overflowTop) break;
 
     if (overflowX) {
-      const maxFitSpacing = n > 1 ? Math.max(0.02, (window.innerWidth * 0.00092) / (n - 1)) : spacing;
+      const maxFitSpacing = n > 1 ? Math.max(0.02, (window.innerWidth * 0.00016) / (n - 1)) : spacing;
       spacing = Math.max(Math.min(maxFitSpacing, spacing * 0.92), dominoWidth * 1.1);
       arcStrength = Math.max(0.1, arcStrength * 0.94);
     }
@@ -2781,8 +3234,9 @@ function renderTableTrick(trick) {
   }
 
   const localSeat = getLocalSeat();
-  const radius = Math.max(0.38, Math.min(0.62, tableMetrics.radius * 0.14));
+  const radius = Math.max(0.22, Math.min(0.46, tableMetrics.radius * 0.11));
   const centerY = tableMetrics.topY + 0.012;
+  const tableScale = Number(viewSettings.tableDominoScale) || 1;
 
   for (const play of plays) {
     const rel = toRelativeSeat(play.seatIndex, localSeat);
@@ -2793,12 +3247,12 @@ function renderTableTrick(trick) {
       { x: -radius, z: 0 }
     ][rel] || { x: 0, z: 0 };
 
-    const mesh = createDominoMesh(play.tile, {
+    const mesh = createDomino3D(play.tile, {
       faceUp: true,
       glowCount: countTilePoints(play.tile) > 0,
       trumpSuit: roomState?.trumpSuit,
       useMagentaTrump: roomState?.mode === MODES.TRUMPS,
-      scale: DOMINO_SCALE
+      scale: tableScale
     });
     mesh.position.set(cross.x, centerY, cross.z);
     mesh.rotation.y = rel === 1 ? -Math.PI / 2 : rel === 3 ? Math.PI / 2 : rel === 2 ? Math.PI : 0;
@@ -2846,7 +3300,7 @@ function renderHandsAndTrick() {
     const yaw = Math.atan2(basis.right.z, basis.right.x);
 
     for (let i = 0; i < count; i += 1) {
-      const mesh = createDominoMesh({ a: 0, b: 0, id: 'back' }, { faceUp: false, scale: DOMINO_SCALE });
+      const mesh = createDomino3D({ a: 0, b: 0, id: 'back' }, { faceUp: false, scale: DOMINO_SCALE * 0.92 });
       mesh.position.copy(stackBase)
         .addScaledVector(basis.up, i * 0.008)
         .addScaledVector(basis.right, (i % 2 === 0 ? -1 : 1) * 0.01);
@@ -2995,7 +3449,10 @@ function setupViewControls() {
       pitchDeg: Number(viewSettings.pitchDeg),
       near: Number(viewSettings.near),
       handY: Number(viewSettings.handY),
-      handZ: Number(viewSettings.handZ)
+      handZ: Number(viewSettings.handZ),
+      handDominoScale: Number(viewSettings.handDominoScale),
+      handDominoRotDeg: Number(viewSettings.handDominoRotDeg),
+      tableDominoScale: Number(viewSettings.tableDominoScale)
     }, null, 2);
     try {
       await navigator.clipboard.writeText(payload);
@@ -3830,12 +4287,12 @@ function ensureButtons() {
 
   spawnTestDominoBtn?.addEventListener('click', () => {
     const testTile = { a: 6, b: 4, id: '6-4' };
-    const mesh = createDominoMesh(testTile, {
+    const mesh = createDomino3D(testTile, {
       faceUp: true,
       glowCount: true,
       trumpSuit: roomState?.trumpSuit,
       useMagentaTrump: roomState?.mode === MODES.TRUMPS,
-      scale: DOMINO_SCALE
+      scale: Number(viewSettings.tableDominoScale) || 1
     });
     mesh.position.set(0, tableMetrics.topY + 0.02, 0);
     mesh.rotation.y = 0;
@@ -3927,7 +4384,7 @@ function addPointerInteraction() {
     const baseY = Number.isFinite(mesh.userData?.baseY) ? mesh.userData.baseY : DOMINO_Y;
     const targetY = baseY + (selected ? 0.016 : hovered ? 0.008 : 0);
     mesh.position.y = targetY;
-    const topMat = Array.isArray(mesh.material) ? mesh.material[2] : null;
+    const topMat = Array.isArray(mesh.material) ? mesh.material[2] : mesh.material;
     if (topMat?.emissive) {
       if (selected) {
         topMat.emissive.setHex(0x5a4b1f);
@@ -4093,7 +4550,8 @@ async function loadEnvironmentManifest() {
           .map((entry) => ({
             id: String(entry.id),
             name: String(entry.name || entry.id),
-            preview: entry.preview ? String(entry.preview) : ''
+            preview: entry.preview ? String(entry.preview) : '',
+            root: entry.root ? String(entry.root) : `/assets/environments/${String(entry.id)}`
           }));
       }
     }
@@ -4105,7 +4563,8 @@ async function loadEnvironmentManifest() {
     entries = Object.keys(ENV_THEME_PRESETS).map((id) => ({
       id,
       name: id.replace(/_/g, ' '),
-      preview: ''
+      preview: '',
+      root: `/assets/environments/${id}`
     }));
   }
 

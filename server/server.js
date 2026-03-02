@@ -37,6 +37,7 @@ const ROOT_DIR = path.resolve(__dirname, '..');
 const AVATAR_MANIFEST_PATH = path.join(ROOT_DIR, 'client', 'assets', 'avatars', 'manifest.json');
 const ENVIRONMENT_MANIFEST_PATH = path.join(ROOT_DIR, 'client', 'assets', 'environments', 'environments.json');
 const FALLBACK_ENVIRONMENT_IDS = [
+  'casino_lounge',
   'default_lounge',
   'witch_parlor',
   'zombie_graveyard',
@@ -61,6 +62,57 @@ app.get('/health', (_req, res) => {
 });
 app.get('/socket-health', (_req, res) => {
   res.type('text/plain').send('socket ok');
+});
+
+function safeEnvironmentId(raw) {
+  return String(raw || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+    .slice(0, 80);
+}
+
+function listFilesRecursive(dirPath, basePath) {
+  const out = [];
+  const stack = [dirPath];
+  while (stack.length) {
+    const current = stack.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry || entry.name.startsWith('._') || entry.name === '.gitkeep') continue;
+      const abs = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(abs);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const rel = path.relative(basePath, abs).split(path.sep).join('/');
+      out.push(rel);
+      if (out.length >= 1200) return out;
+    }
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+}
+
+app.get('/api/environment-files/:envId', (req, res) => {
+  const envId = safeEnvironmentId(req.params.envId);
+  if (!envId) {
+    res.status(400).json({ ok: false, message: 'Invalid environment id.', files: [] });
+    return;
+  }
+  const envBasePath = path.join(ROOT_DIR, 'client', 'assets', 'environments');
+  const envPath = path.join(envBasePath, envId);
+  if (!fs.existsSync(envPath)) {
+    res.status(200).json({ ok: true, files: [] });
+    return;
+  }
+  const files = listFilesRecursive(envPath, envBasePath)
+    .map((relPath) => `/assets/environments/${relPath}`);
+  res.status(200).json({ ok: true, files });
 });
 
 const httpServer = http.createServer(app);

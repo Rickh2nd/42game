@@ -110,3 +110,54 @@ Update (urgent gameplay/UI fixes pass):
   - /health OK
   - socket.io handshake OK
   - room:create ack OK.
+
+Update (casino lounge + flat domino tile pass):
+- Added `casino_lounge` environment entry to `/client/assets/environments/environments.json` with root + preview.
+- Added folder scaffold:
+  - `/client/assets/environments/casino_lounge/hdri/`
+  - `/client/assets/environments/casino_lounge/materials/floor/`
+  - `/client/assets/environments/casino_lounge/materials/walls/`
+  - `/client/assets/environments/casino_lounge/materials/trim/`
+  - `/client/assets/environments/casino_lounge/props/`
+  - `/client/assets/environments/casino_lounge/README.md`
+  - `/client/assets/environments/casino_lounge/preview.svg`
+- Server additions:
+  - Added `/api/environment-files/:envId` route in `/server/server.js` to recursively list environment files (ignores `._*` and `.gitkeep`).
+  - Added `casino_lounge` to fallback environment ids.
+- Client environment system updates in `/client/main.js`:
+  - Added runtime file-catalog fetch + texture/HDR caches for environment assets.
+  - Added casino lounge room-shell builder (floor, 3 walls, ceiling, baseboards/trim).
+  - Added warm casino lighting preset and optional prop loading from `/props` when assets exist.
+  - Added graceful procedural fallback materials (carpet/wallpaper/trim) when files are missing.
+  - `applyEnvironment('casino_lounge')` now builds an indoor room instead of skybox-only backdrop.
+- Domino render updates in `/client/main.js`:
+  - Global realistic domino size reduced from oversized values:
+    - `DOMINO_LONG=0.056`, `DOMINO_SHORT=0.029`, `DOMINO_THICKNESS=0.011`.
+  - Added near-2D hand tile path:
+    - `createDominoTile(...)` uses flat plane geometry + portrait CanvasTexture.
+    - Hand layout now uses `createDominoTile` (flat look) and keeps click/raycast behavior.
+  - Kept in-play trick tiles on 3D path via `createDomino3D(...)`.
+  - Unified canvas face renderer (`drawDominoFaceCanvas`) used for consistent ivory realism.
+  - Fixed burn tile partial/half-render bug by removing incorrect burn-canvas scaling and redrawing full-size canvases.
+- View slider updates:
+  - Expanded ranges in `/client/index.html` and in JS clamps to the new wide bounds.
+  - Added new sliders + persistence:
+    - `hand_domino_scale`
+    - `hand_domino_rot_deg`
+    - `table_domino_scale`
+  - Included these fields in localStorage payload and Copy View Settings JSON output.
+  - Live updates trigger immediate hand/trick re-render.
+
+Validation performed:
+- `node --check client/main.js` pass
+- `node --check server/server.js` pass
+- Local server smoke on `PORT=18103`:
+  - `/health` returns JSON ok
+  - `/socket.io` polling handshake returns engine payload
+  - `/api/environment-files/casino_lounge` returns file list JSON
+- Playwright skill script attempted per workflow but blocked:
+  - fails with `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright'`.
+
+Remaining TODOs:
+- Visual pass in browser to fine-tune hand arc/spacing defaults if needed after flat-tile switch.
+- If real casino textures/HDRI are available locally, place them in the new folder and verify auto-detection mapping picks them.

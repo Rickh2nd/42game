@@ -184,53 +184,68 @@
           <h2>VIEW</h2>
           <div class="viewControl">
             <label for="view_distance">Distance</label>
-            <input id="view_distance" type="range" min="0.25" max="4.50" step="0.01" />
+            <input id="view_distance" type="range" min="0.10" max="8.00" step="0.01" />
             <span id="view_distance_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_height">Height</label>
-            <input id="view_height" type="range" min="0.40" max="3.00" step="0.01" />
+            <input id="view_height" type="range" min="0.10" max="6.00" step="0.01" />
             <span id="view_height_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_forward">Forward Offset</label>
-            <input id="view_forward" type="range" min="-1.50" max="1.50" step="0.01" />
+            <input id="view_forward" type="range" min="-4.00" max="4.00" step="0.01" />
             <span id="view_forward_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_shoulder">Shoulder Offset</label>
-            <input id="view_shoulder" type="range" min="-1.25" max="1.25" step="0.01" />
+            <input id="view_shoulder" type="range" min="-4.00" max="4.00" step="0.01" />
             <span id="view_shoulder_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_lookat_y">LookAt Height</label>
-            <input id="view_lookat_y" type="range" min="0.20" max="3.00" step="0.01" />
+            <input id="view_lookat_y" type="range" min="-1.00" max="6.00" step="0.01" />
             <span id="view_lookat_y_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_fov">FOV</label>
-            <input id="view_fov" type="range" min="25" max="100" step="1" />
+            <input id="view_fov" type="range" min="15" max="120" step="1" />
             <span id="view_fov_val" class="viewVal">0</span>
           </div>
           <div class="viewControl">
             <label for="view_pitch_deg">Pitch</label>
-            <input id="view_pitch_deg" type="range" min="-45" max="45" step="0.5" />
+            <input id="view_pitch_deg" type="range" min="-80" max="80" step="0.5" />
             <span id="view_pitch_deg_val" class="viewVal">0.0</span>
           </div>
           <div class="viewControl">
             <label for="view_near">Near Clip</label>
-            <input id="view_near" type="range" min="0.005" max="0.50" step="0.005" />
+            <input id="view_near" type="range" min="0.001" max="1.00" step="0.001" />
             <span id="view_near_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="hand_y">Hand Vertical Offset</label>
-            <input id="hand_y" type="range" min="-0.20" max="0.40" step="0.01" />
+            <input id="hand_y" type="range" min="-1.00" max="1.00" step="0.01" />
             <span id="hand_y_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="hand_z">Hand Distance Offset</label>
-            <input id="hand_z" type="range" min="-1.00" max="1.00" step="0.01" />
+            <input id="hand_z" type="range" min="-4.00" max="4.00" step="0.01" />
             <span id="hand_z_val" class="viewVal">0.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="hand_domino_scale">Hand Domino Size</label>
+            <input id="hand_domino_scale" type="range" min="0.20" max="3.00" step="0.01" />
+            <span id="hand_domino_scale_val" class="viewVal">1.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="hand_domino_rot_deg">Hand Domino Orientation</label>
+            <input id="hand_domino_rot_deg" type="range" min="-180" max="180" step="1" />
+            <span id="hand_domino_rot_deg_val" class="viewVal">0</span>
+          </div>
+          <div class="viewControl">
+            <label for="table_domino_scale">Played Domino Size</label>
+            <input id="table_domino_scale" type="range" min="0.20" max="3.00" step="0.01" />
+            <span id="table_domino_scale_val" class="viewVal">1.00</span>
           </div>
           <div class="buttonRow">
             <button id="resetViewBtn">Reset View</button>
