@@ -191,7 +191,6 @@
             <div id="environmentStateText" class="smallText"></div>
             <div id="environmentLoadText" class="smallText"></div>
           </div>
-          <div class="smallText" id="decorLoadText">Decor: pending</div>
           <div class="viewControl">
             <label for="burn_panel_opacity">Burn Panel Opacity</label>
             <input id="burn_panel_opacity" type="range" min="0.01" max="1.00" step="0.01" />
@@ -212,11 +211,6 @@
 
         <section id="section-lighting" class="panelSection">
           <h2>LIGHTING</h2>
-          <div class="viewControl">
-            <label for="decor_global_scale">Decor Global Scale</label>
-            <input id="decor_global_scale" type="range" min="0.25" max="3.00" step="0.05" />
-            <span id="decor_global_scale_val" class="viewVal">1.00</span>
-          </div>
           <h3 class="subhead">TEXTURE DETAIL</h3>
           <div class="viewControl">
             <label for="floor_texture_scale">Floor Texture Scale</label>
@@ -466,19 +460,6 @@
             <button id="spawnTestDominoBtn">Spawn Test Domino</button>
           </div>
           <div id="tableDominoDebugReadout" class="smallText">Trick: 0 | Rendered: 0 | tabletopY: 0.000</div>
-          <hr />
-          <h2>DEBUG: DECOR</h2>
-          <div class="controlRow">
-            <label>
-              <input id="decorBoundsToggle" type="checkbox" />
-              Show Decor Bounds
-            </label>
-          </div>
-          <div class="buttonRow">
-            <button id="listLoadedPropsBtn">List Loaded Props</button>
-            <button id="decorTestSpawnBtn">Decor Test Spawn</button>
-          </div>
-          <div id="decorDebugList" class="smallText">No props loaded yet.</div>
         </section>
 
         <section id="section-bidding" class="panelSection">

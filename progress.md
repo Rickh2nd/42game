@@ -737,3 +737,29 @@ Validation this pass:
 
 TODO / follow-up:
 - Run headed visual check once `playwright` is installed to verify shelf-book density and frame-facing final polish in-browser.
+
+Update (decor removal + env hardening pass):
+- Removed all decor/prop assets from repo:
+  - deleted `client/assets/environments/_shared/props/`
+  - deleted `client/assets/environments/casino_lounge/props/`
+- Removed prop/decor API surface:
+  - deleted server route `GET /api/shared-props`
+  - removed related model-discovery helper in `server/server.js`.
+- Removed decor UI controls/status/debug from client:
+  - removed `Decor Global Scale` slider
+  - removed decor status text and decor debug subsection/buttons.
+- Removed/deactivated decor load path in environment pipeline:
+  - environment apply now only builds room shell + materials + HDRI.
+  - environment status no longer includes decor fields.
+- Kept environment selection, texture detail controls, and EXR/HDRI lighting pipeline intact.
+
+Validation:
+- `node --check client/main.js` pass
+- `node --check server/server.js` pass
+- smoke with `PORT=3100`:
+  - `/health` OK
+  - `/api/environment-files/casino_lounge` returns materials list
+  - `/api/shared-props` now 404 (expected)
+- Size reduction observed:
+  - repo: ~6.4G -> ~3.8G
+  - `client/assets/environments`: now ~486M

@@ -89,26 +89,6 @@ function listFilesRecursive(dirPath, basePath) {
   return out.sort((a, b) => a.localeCompare(b));
 }
 
-function chooseLargestModelFile(folderPath) {
-  const relFiles = listFilesRecursive(folderPath, folderPath);
-  let best = null;
-  for (const relFile of relFiles) {
-    const low = relFile.toLowerCase();
-    if (!(low.endsWith('.glb') || low.endsWith('.gltf') || low.endsWith('.obj'))) continue;
-    const abs = path.join(folderPath, relFile);
-    let size = 0;
-    try {
-      size = fs.statSync(abs).size;
-    } catch {
-      size = 0;
-    }
-    if (!best || size > best.size) {
-      best = { relFile, size };
-    }
-  }
-  return best ? best.relFile.split(path.sep).join('/') : '';
-}
-
 app.get('/api/environment-files/:envId', (req, res) => {
   const envId = safeEnvironmentId(req.params.envId);
   if (!envId) {
@@ -124,45 +104,6 @@ app.get('/api/environment-files/:envId', (req, res) => {
   const files = listFilesRecursive(envPath, envBasePath)
     .map((relPath) => `/assets/environments/${relPath}`);
   res.status(200).json({ ok: true, files });
-});
-
-app.get('/api/shared-props', (_req, res) => {
-  const propsRoot = path.join(ROOT_DIR, 'client', 'assets', 'environments', '_shared', 'props');
-  if (!fs.existsSync(propsRoot)) {
-    res.status(200).json({
-      ok: true,
-      props: [],
-      expectedDir: 'client/assets/environments/_shared/props'
-    });
-    return;
-  }
-
-  let entries = [];
-  try {
-    entries = fs.readdirSync(propsRoot, { withFileTypes: true });
-  } catch {
-    entries = [];
-  }
-
-  const props = [];
-  for (const entry of entries) {
-    if (!entry?.isDirectory?.()) continue;
-    if (entry.name.startsWith('._') || entry.name === '.gitkeep') continue;
-    const folder = String(entry.name);
-    const folderPath = path.join(propsRoot, folder);
-    const modelRel = chooseLargestModelFile(folderPath);
-    props.push({
-      folder,
-      modelUrl: modelRel ? `/assets/environments/_shared/props/${folder}/${modelRel}` : ''
-    });
-  }
-
-  props.sort((a, b) => a.folder.localeCompare(b.folder));
-  res.status(200).json({
-    ok: true,
-    props,
-    expectedDir: 'client/assets/environments/_shared/props'
-  });
 });
 
 const httpServer = http.createServer(app);
