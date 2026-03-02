@@ -478,6 +478,7 @@ const decorDebugState = {
   failures: [],
   requested: 0
 };
+const loggedDecorScaleFolders = new Set();
 let sharedPropCatalogLogged = false;
 let showDecorBounds = false;
 const envLightingStateById = new Map();
@@ -1652,10 +1653,10 @@ function applyLightingState(settings, { persist = false } = {}) {
     Math.min(1, warmth.b * 0.86 + 0.07)
   );
 
-  keyLight.intensity = safe.keyIntensity;
-  fillLight.intensity = safe.fillIntensity;
-  rimLight.intensity = safe.rimIntensity;
-  ambient.intensity = safe.ambientIntensity * ambientDarknessFactor;
+  keyLight.intensity = safe.keyIntensity * 1.12;
+  fillLight.intensity = safe.fillIntensity * 0.82;
+  rimLight.intensity = safe.rimIntensity * 0.9;
+  ambient.intensity = safe.ambientIntensity * ambientDarknessFactor * 0.88;
 
   scene.environmentIntensity = safe.hdriIntensity;
   if (scene.fog) {
@@ -4118,6 +4119,13 @@ function normalizeAssetUrlPath(value) {
   return hasLeadingSlash ? `/${joined}` : joined;
 }
 
+function ensureUv2(geometry) {
+  if (!geometry || !geometry.attributes?.uv || geometry.attributes.uv2) return geometry;
+  const uvArray = geometry.attributes.uv.array;
+  geometry.setAttribute('uv2', new THREE.BufferAttribute(new Float32Array(uvArray), 2));
+  return geometry;
+}
+
 function environmentRootFor(entry) {
   if (entry?.root && typeof entry.root === 'string') {
     const normalized = normalizeAssetUrlPath(entry.root);
@@ -4247,7 +4255,7 @@ async function loadEnvironmentTexture(url, { srgb = true, repeat = [1, 1] } = {}
         tex.wrapS = THREE.RepeatWrapping;
         tex.wrapT = THREE.RepeatWrapping;
         tex.repeat.set(repeat[0], repeat[1]);
-        tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
         tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
         tex.needsUpdate = true;
         resolve(tex);
@@ -4330,17 +4338,32 @@ function resolveMaterialPaths(envRoot, environmentId) {
     floor: {
       baseColor: buildMaterialMapCandidates(envRoot, floorDirCandidates, 'baseColor'),
       normal: buildMaterialMapCandidates(envRoot, floorDirCandidates, 'normal'),
-      roughness: buildMaterialMapCandidates(envRoot, floorDirCandidates, 'roughness')
+      roughness: buildMaterialMapCandidates(envRoot, floorDirCandidates, 'roughness'),
+      ao: [
+        ...buildMaterialMapCandidates(envRoot, floorDirCandidates, 'ao'),
+        ...buildMaterialMapCandidates(envRoot, floorDirCandidates, 'ambientOcclusion'),
+        ...buildMaterialMapCandidates(envRoot, floorDirCandidates, 'ambient_occlusion')
+      ]
     },
     walls: {
       baseColor: buildMaterialMapCandidates(envRoot, wallDirCandidates, 'baseColor'),
       normal: buildMaterialMapCandidates(envRoot, wallDirCandidates, 'normal'),
-      roughness: buildMaterialMapCandidates(envRoot, wallDirCandidates, 'roughness')
+      roughness: buildMaterialMapCandidates(envRoot, wallDirCandidates, 'roughness'),
+      ao: [
+        ...buildMaterialMapCandidates(envRoot, wallDirCandidates, 'ao'),
+        ...buildMaterialMapCandidates(envRoot, wallDirCandidates, 'ambientOcclusion'),
+        ...buildMaterialMapCandidates(envRoot, wallDirCandidates, 'ambient_occlusion')
+      ]
     },
     trim: {
       baseColor: buildMaterialMapCandidates(envRoot, trimDirCandidates, 'baseColor'),
       normal: buildMaterialMapCandidates(envRoot, trimDirCandidates, 'normal'),
-      roughness: buildMaterialMapCandidates(envRoot, trimDirCandidates, 'roughness')
+      roughness: buildMaterialMapCandidates(envRoot, trimDirCandidates, 'roughness'),
+      ao: [
+        ...buildMaterialMapCandidates(envRoot, trimDirCandidates, 'ao'),
+        ...buildMaterialMapCandidates(envRoot, trimDirCandidates, 'ambientOcclusion'),
+        ...buildMaterialMapCandidates(envRoot, trimDirCandidates, 'ambient_occlusion')
+      ]
     }
   };
 }
@@ -4537,6 +4560,29 @@ const ENV_DECOR_LAYOUTS = {
   ]
 };
 
+const PROP_SCALE_OVERRIDES = {
+  industrial_wall_lamp_4k: 1.0,
+  lightbulb_led_4k: 1.0,
+  decorative_book_set_01_4k: 1.0
+};
+
+function targetHeightForPropFolder(folderName) {
+  const folder = String(folderName || '').toLowerCase();
+  if (!folder) return 1.2;
+  if (folder.includes('bookshelf')) return 2.1;
+  if (folder.includes('shelves') || folder.includes('shelf')) return 2.0;
+  if (folder.includes('book_set')) return 0.25;
+  if (folder.includes('lightbulb')) return 0.15;
+  if (folder.includes('wall_lamp')) return 0.45;
+  if (folder.includes('lamp')) return 1.4;
+  if (folder.includes('picture_frame') || folder.includes('frame')) return 0.7;
+  if (folder.includes('table')) {
+    if (folder.includes('tall')) return 1.0;
+    return 0.75;
+  }
+  return 1.2;
+}
+
 async function fetchSharedPropCatalog() {
   if (decorDebugState.sharedCatalog) return decorDebugState.sharedCatalog;
   try {
@@ -4665,20 +4711,23 @@ async function addEnvironmentDecor(roomRoot, environmentId) {
     model.updateWorldMatrix(true, true);
     tmpBox.setFromObject(model);
     if (Number.isFinite(tmpBox.min.y) && Number.isFinite(tmpBox.max.y)) {
-      const rawHeight = Math.max(0.0001, tmpBox.max.y - tmpBox.min.y);
-      const folder = String(spec.folder || '').toLowerCase();
-      let targetHeight = 1.1;
-      if (folder.includes('lamp') || folder.includes('lightbulb')) targetHeight = 1.4;
-      if (folder.includes('table')) targetHeight = 0.8;
-      if (folder.includes('shelf') || folder.includes('bookshelf')) targetHeight = 2.0;
-      if (folder.includes('frame') || folder.includes('picture')) targetHeight = 0.7;
-      const fittedScale = clampValue(targetHeight / rawHeight, 0.08, 2.8, 0.4);
-      const authoredScale = Number(spec.scale || 1);
-      model.scale.multiplyScalar(fittedScale * authoredScale);
+      const beforeHeight = Math.max(tmpBox.max.y - tmpBox.min.y, 0.0001);
+      const targetHeight = targetHeightForPropFolder(spec.folder);
+      const autoScale = THREE.MathUtils.clamp(targetHeight / beforeHeight, 0.05, 50);
+      const overrideScale = Number(PROP_SCALE_OVERRIDES[String(spec.folder)] ?? 1);
+      const finalScale = autoScale * overrideScale;
+      model.scale.multiplyScalar(finalScale);
+      if (!loggedDecorScaleFolders.has(String(spec.folder))) {
+        loggedDecorScaleFolders.add(String(spec.folder));
+        console.log('[decor] scaled', spec.folder, {
+          beforeH: Number(beforeHeight.toFixed(4)),
+          target: Number(targetHeight.toFixed(4)),
+          scale: Number(finalScale.toFixed(4))
+        });
+      }
       model.updateWorldMatrix(true, true);
       tmpBox.setFromObject(model);
-      // Ground floor-level props while leaving elevated props at authored height.
-      if (Math.abs(Number(spec.pos?.[1] || 0)) < 0.01 && Number.isFinite(tmpBox.min.y)) {
+      if (Number.isFinite(tmpBox.min.y) && tmpBox.min.y < FLOOR_Y + 0.01) {
         model.position.y += (FLOOR_Y + 0.01) - tmpBox.min.y;
       }
     }
@@ -4707,13 +4756,15 @@ function addCasinoTrim(roomRoot, roomWidth, roomDepth, wallHeight, material) {
   const xRight = (roomWidth * 0.5) - (trimDepth * 0.5);
   const y = trimHeight * 0.5;
 
-  const backTrim = new THREE.Mesh(new THREE.BoxGeometry(roomWidth, trimHeight, trimDepth), material);
+  const backTrimGeo = ensureUv2(new THREE.BoxGeometry(roomWidth, trimHeight, trimDepth));
+  const backTrim = new THREE.Mesh(backTrimGeo, material);
   backTrim.position.set(0, y, zBack);
   backTrim.receiveShadow = true;
   backTrim.castShadow = true;
   roomRoot.add(backTrim);
 
-  const leftTrim = new THREE.Mesh(new THREE.BoxGeometry(trimDepth, trimHeight, roomDepth), material);
+  const leftTrimGeo = ensureUv2(new THREE.BoxGeometry(trimDepth, trimHeight, roomDepth));
+  const leftTrim = new THREE.Mesh(leftTrimGeo, material);
   leftTrim.position.set(xLeft, y, 0);
   leftTrim.receiveShadow = true;
   leftTrim.castShadow = true;
@@ -4736,36 +4787,36 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   const floorMaterial = new THREE.MeshStandardMaterial({
     map: carpetTexture,
     color: 0xffffff,
-    roughness: 0.94,
+    roughness: environmentId === 'casino_lounge' ? 0.75 : 0.55,
     metalness: 0.0
   });
   const wallMaterial = new THREE.MeshStandardMaterial({
     map: wallpaperTexture,
     color: 0xffffff,
-    roughness: 0.86,
+    roughness: 0.85,
     metalness: 0.0
   });
   const trimMaterial = new THREE.MeshStandardMaterial({
     map: woodTexture,
     color: 0xffffff,
-    roughness: 0.58,
+    roughness: 0.45,
     metalness: 0.0
   });
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, roomDepth), floorMaterial);
+  const floor = new THREE.Mesh(ensureUv2(new THREE.PlaneGeometry(roomWidth, roomDepth)), floorMaterial);
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = 0;
   floor.receiveShadow = true;
   floor.castShadow = false;
   roomRoot.add(floor);
 
-  const backWall = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, wallHeight), wallMaterial);
+  const backWall = new THREE.Mesh(ensureUv2(new THREE.PlaneGeometry(roomWidth, wallHeight)), wallMaterial);
   backWall.position.set(0, wallHeight * 0.5, -(roomDepth * 0.5));
   backWall.receiveShadow = true;
   backWall.castShadow = false;
   roomRoot.add(backWall);
 
-  const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(roomDepth, wallHeight), wallMaterial);
+  const leftWall = new THREE.Mesh(ensureUv2(new THREE.PlaneGeometry(roomDepth, wallHeight)), wallMaterial);
   leftWall.position.set(-(roomWidth * 0.5), wallHeight * 0.5, 0);
   leftWall.rotation.y = Math.PI / 2;
   leftWall.receiveShadow = true;
@@ -4778,7 +4829,7 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   roomRoot.add(rightWall);
 
   const ceiling = new THREE.Mesh(
-    new THREE.PlaneGeometry(roomWidth, roomDepth),
+    ensureUv2(new THREE.PlaneGeometry(roomWidth, roomDepth)),
     new THREE.MeshStandardMaterial({ color: 0x2a211b, roughness: 0.9, metalness: 0.0 })
   );
   ceiling.rotation.x = Math.PI / 2;
@@ -4788,9 +4839,9 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   addCasinoTrim(roomRoot, roomWidth, roomDepth, wallHeight, trimMaterial);
   themeGroup.add(roomRoot);
 
-  const floorRepeat = environmentId === 'casino_lounge' ? [12, 14] : [8, 10];
-  const wallRepeat = [4, 3];
-  const trimRepeat = [7, 2];
+  const floorRepeat = environmentId === 'casino_lounge' ? [10, 12] : [14, 14];
+  const wallRepeat = [5, 4];
+  const trimRepeat = [10, 3];
   const envRoot = environmentRootFor(entry);
   const envStatus = {
     envId: environmentId,
@@ -4806,38 +4857,56 @@ async function buildRoomEnvironment(entry, token, environmentId) {
     floorBaseTex,
     floorNormalTex,
     floorRoughTex,
+    floorAoTex,
     wallBaseTex,
     wallNormalTex,
     wallRoughTex,
+    wallAoTex,
     trimBaseTex,
     trimNormalTex,
-    trimRoughTex
+    trimRoughTex,
+    trimAoTex
   ] = await Promise.all([
     loadTextureSafe(materialPaths.floor.baseColor, { srgb: true, repeat: floorRepeat }, envStatus, 'floor.baseColor'),
     loadTextureSafe(materialPaths.floor.normal, { srgb: false, repeat: floorRepeat }, envStatus, 'floor.normal'),
     loadTextureSafe(materialPaths.floor.roughness, { srgb: false, repeat: floorRepeat }, envStatus, 'floor.roughness'),
+    loadTextureSafe(materialPaths.floor.ao, { srgb: false, repeat: floorRepeat }, envStatus, 'floor.ao'),
     loadTextureSafe(materialPaths.walls.baseColor, { srgb: true, repeat: wallRepeat }, envStatus, 'walls.baseColor'),
     loadTextureSafe(materialPaths.walls.normal, { srgb: false, repeat: wallRepeat }, envStatus, 'walls.normal'),
     loadTextureSafe(materialPaths.walls.roughness, { srgb: false, repeat: wallRepeat }, envStatus, 'walls.roughness'),
+    loadTextureSafe(materialPaths.walls.ao, { srgb: false, repeat: wallRepeat }, envStatus, 'walls.ao'),
     loadTextureSafe(materialPaths.trim.baseColor, { srgb: true, repeat: trimRepeat }, envStatus, 'trim.baseColor'),
     loadTextureSafe(materialPaths.trim.normal, { srgb: false, repeat: trimRepeat }, envStatus, 'trim.normal'),
-    loadTextureSafe(materialPaths.trim.roughness, { srgb: false, repeat: trimRepeat }, envStatus, 'trim.roughness')
+    loadTextureSafe(materialPaths.trim.roughness, { srgb: false, repeat: trimRepeat }, envStatus, 'trim.roughness'),
+    loadTextureSafe(materialPaths.trim.ao, { srgb: false, repeat: trimRepeat }, envStatus, 'trim.ao')
   ]);
   if (token !== environmentApplyToken) return;
 
   if (floorBaseTex) floorMaterial.map = floorBaseTex;
   if (floorNormalTex) floorMaterial.normalMap = floorNormalTex;
   if (floorRoughTex) floorMaterial.roughnessMap = floorRoughTex;
+  if (floorAoTex) floorMaterial.aoMap = floorAoTex;
+  floorMaterial.aoMapIntensity = floorAoTex ? 0.8 : 0;
+  floorMaterial.normalScale.set(0.8, 0.8);
+  floorMaterial.roughness = environmentId === 'casino_lounge' ? 0.75 : 0.55;
   floorMaterial.needsUpdate = true;
 
   if (wallBaseTex) wallMaterial.map = wallBaseTex;
   if (wallNormalTex) wallMaterial.normalMap = wallNormalTex;
   if (wallRoughTex) wallMaterial.roughnessMap = wallRoughTex;
+  if (wallAoTex) wallMaterial.aoMap = wallAoTex;
+  wallMaterial.aoMapIntensity = wallAoTex ? 0.8 : 0;
+  wallMaterial.normalScale.set(0.6, 0.6);
+  wallMaterial.roughness = 0.85;
   wallMaterial.needsUpdate = true;
 
   if (trimBaseTex) trimMaterial.map = trimBaseTex;
   if (trimNormalTex) trimMaterial.normalMap = trimNormalTex;
   if (trimRoughTex) trimMaterial.roughnessMap = trimRoughTex;
+  if (trimAoTex) trimMaterial.aoMap = trimAoTex;
+  trimMaterial.aoMapIntensity = trimAoTex ? 0.7 : 0;
+  trimMaterial.normalScale.set(0.6, 0.6);
+  trimMaterial.roughness = 0.45;
   trimMaterial.needsUpdate = true;
 
   const hdriTex = await chooseEnvironmentHdri(envRoot, environmentId, catalog);

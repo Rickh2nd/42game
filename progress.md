@@ -610,3 +610,37 @@ Validation:
 TODO (next pass if needed):
 - Run full browser visual verification for each environment to confirm decor placement aesthetics.
 - Optionally remove legacy `/api/shared-props` route now that client uses static `props.json`.
+
+Update (prop scale + environment PBR depth pass):
+- Implemented deterministic prop auto-scale by measured bounding-box height in `/client/main.js`:
+  - Added category-based target heights per folder name:
+    - shelves 2.0, bookshelf 2.1, tables 0.75, tall side table 1.0,
+      wall lamp 0.45, lamps 1.4, frames 0.7, book set 0.25, lightbulb 0.15, default 1.2.
+  - Applied scale factor with required clamp:
+    - `THREE.MathUtils.clamp(targetHeight / h, 0.05, 50)`.
+  - Added floor clamp after scaling for all props:
+    - pushes model up when below `FLOOR_Y + 0.01`.
+  - Added one-time dev log per prop folder:
+    - `[decor] scaled <folder> { beforeH, target, scale }`.
+  - Added `PROP_SCALE_OVERRIDES` table support for manual edge-case tuning.
+
+- Improved floor/wall/trim material depth so environments look less flat:
+  - Added AO map candidate resolution in `resolveMaterialPaths` for floor/walls/trim.
+  - Loaded/applied AO maps in `buildRoomEnvironment` with `aoMapIntensity` tuning.
+  - Added `normalScale` tuning:
+    - floor `(0.8,0.8)`, walls `(0.6,0.6)`, trim `(0.6,0.6)`.
+  - Set stronger roughness baselines:
+    - floor casino `0.75` else `0.55`, walls `0.85`, trim `0.45`.
+  - Increased tiling repeats for detail readability:
+    - floor casino `[10,12]`, others `[14,14]`, walls `[5,4]`, trim `[10,3]`.
+  - Ensured UV2 exists on room geometries/trim for AO usage via `ensureUv2()` helper.
+  - Kept texture encoding correct:
+    - baseColor sRGB, normal/roughness/ao linear.
+  - Capped anisotropy to `min(8, maxSupported)` for stable quality/perf.
+
+- Lighting contrast tuned to reduce flat look under HDRI:
+  - key/fill/rim/ambient weighting adjusted in `applyLightingState` to produce clearer depth while preserving slider control.
+
+Validation:
+- `node --check client/main.js` pass
+- `node --check server/server.js` pass
