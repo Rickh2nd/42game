@@ -28,7 +28,7 @@ const PHASES = {
 };
 
 const FLOOR_Y = 0;
-const AVATAR_GLOBAL_NUDGE_Y = 0.015;
+const AVATAR_GLOBAL_NUDGE_Y = -0.06;
 const PLAY_PLANE_Y = 0.6;
 const DOMINO_LONG = 0.056;
 const DOMINO_SHORT = 0.029;
@@ -1837,11 +1837,9 @@ function clampAvatarBaseY(baseY, seatIndex) {
 function enforceAvatarWorldFloorClamp(seatIndex, avatarGroup) {
   if (!avatarGroup) return;
   const minWorldY = FLOOR_Y + 0.05;
-  const minVisibleTopY = FLOOR_Y + 0.42;
 
   avatarGroup.updateWorldMatrix(true, true);
   let meshBottomY = null;
-  let meshTopY = null;
   let meshFound = false;
   avatarGroup.traverse((node) => {
     if (!node?.isMesh || !node.geometry) return;
@@ -1854,9 +1852,6 @@ function enforceAvatarWorldFloorClamp(seatIndex, avatarGroup) {
     tmpMeshBox.copy(tmpGeoBox).applyMatrix4(node.matrixWorld);
     if (!Number.isFinite(tmpMeshBox.min.y)) return;
     meshBottomY = meshBottomY == null ? tmpMeshBox.min.y : Math.min(meshBottomY, tmpMeshBox.min.y);
-    if (Number.isFinite(tmpMeshBox.max.y)) {
-      meshTopY = meshTopY == null ? tmpMeshBox.max.y : Math.max(meshTopY, tmpMeshBox.max.y);
-    }
   });
 
   if (!meshFound) {
@@ -1869,23 +1864,10 @@ function enforceAvatarWorldFloorClamp(seatIndex, avatarGroup) {
   if (meshBottomY != null && meshBottomY < minWorldY) {
     const delta = minWorldY - meshBottomY;
     avatarGroup.position.y += delta;
-    if (meshTopY != null) {
-      meshTopY += delta;
-    }
     warnOnce(
       `avatarWorldFloorClamp:${seatIndex}`,
       `[avatar] clamped above floor seat=${seatIndex} worldY=${meshBottomY.toFixed(3)}`
     );
-  }
-
-  if (meshTopY != null && meshTopY < minVisibleTopY) {
-    const delta = minVisibleTopY - meshTopY;
-    avatarGroup.position.y += delta;
-    warnOnce(
-      `avatarWorldTopClamp:${seatIndex}`,
-      `[avatar] raised for visibility seat=${seatIndex} topY=${meshTopY.toFixed(3)}`
-    );
-    return;
   }
 
   // Fallback to group-origin clamp in case bbox is unavailable.
@@ -3249,11 +3231,11 @@ function normalizeAvatarModel(model, targetHeight = 1.68) {
 }
 
 function applyStaticSeatedPose(model) {
-  model.rotation.x = -0.2;
+  model.rotation.x = -0.24;
   model.scale.y *= 0.76;
   tmpBox.setFromObject(model);
   model.position.y -= tmpBox.min.y;
-  model.position.y -= 0.015;
+  model.position.y -= 0.035;
 }
 
 function alignAvatarModelBaseToLocalGround(model) {
@@ -3619,7 +3601,7 @@ function updateSeatTransforms() {
 
     const avatarGroup = avatarSeatGroups[seatIndex];
     avatarGroup.scale.setScalar(sceneTuning.avatarScale);
-    const avatarRadius = Math.max(0.4, sceneTuning.seatRadius - 0.18 + sceneTuning.avatarBack);
+    const avatarRadius = Math.max(0.4, sceneTuning.seatRadius - 0.28 + sceneTuning.avatarBack);
     const perSeatYOffset = Number(avatarSeatYOffsets?.[seatIndex] || 0);
     const baseSeatHeightAboveFloor = Math.max(
       0,
