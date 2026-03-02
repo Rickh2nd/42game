@@ -644,3 +644,57 @@ Update (prop scale + environment PBR depth pass):
 Validation:
 - `node --check client/main.js` pass
 - `node --check server/server.js` pass
+
+Update (decor scale/placement + material depth pass):
+- Added new lighting/decor controls in UI (`/client/index.html`):
+  - `decor_global_scale` (0.10–10.00, default 1.50)
+  - `floor_repeat`, `wall_repeat`, `trim_repeat` (1–24)
+  - `decorTestSpawnBtn` in decor debug section.
+- Wired new controls in `/client/main.js`:
+  - per-environment persistence for decor scale:
+    - key format `texas42_decor_scale_<envId>_v1`
+  - per-environment persistence for repeats:
+    - key format `texas42_material_repeat_<envId>_v1`
+  - slider changes force environment re-apply immediately.
+
+- Implemented scene-relative prop scaling:
+  - computes decor reference metrics from table/chair/avatar (`getDecorReferenceMetrics`) with fallback chain.
+  - category-based target heights now derived from `ref` fractions (as requested).
+  - auto-scale formula and clamp:
+    - `s = THREE.MathUtils.clamp(targetHeight / h, 0.05, 50)`
+  - applies env-level global decor scale after category scaling.
+  - added one-time per-prop scaling log:
+    - `[decor] scaled <folder> { beforeH, target, scale, decorScale }`
+  - logs environment reference metrics per apply:
+    - `[decor] ref { tableDiameter, chairHeight, avatarHeight, ref }`
+
+- Implemented robust placement helpers and usage:
+  - `snapPropToFloor(model, FLOOR_Y, pad)`
+  - `alignPropToBackWall(model, backWallZ, pad, faceIntoRoom)`
+  - `clampToRoom(model, leftX, rightX, nearZ, farZ)`
+  - tables/shelves quantized to 90-degree rotation increments.
+
+- Improved room material depth (less flat):
+  - added AO candidate loading for floor/walls/trim in `resolveMaterialPaths`.
+  - ensured UV2 for AO on room planes/trim via `ensureUv2` helper.
+  - set PBR tuning:
+    - floor normalScale `(0.9,0.9)`
+    - walls normalScale `(0.6,0.6)`
+    - trim normalScale `(0.7,0.7)`
+    - floor roughness `0.75` (casino) / `0.55` (others)
+    - walls `0.85`, trim `0.45`
+    - AO intensity around `0.7–0.8` when AO map exists.
+  - repeat tiling now per-env slider driven; defaults:
+    - casino floor 10
+    - other floors 14
+    - walls 4.5 (applied as x with y-1)
+    - trim 10
+  - anisotropy remains capped to `min(8, hardware max)`.
+
+- Added decor test spawn action:
+  - spawns `side_table_01_4k` in scene, scales relative to reference, snaps to floor, logs bbox.
+
+Validation:
+- `node --check client/main.js` pass
+- `node --check server/server.js` pass
+- local smoke: `/health` and shared assets endpoints return 200.

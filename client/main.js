@@ -173,9 +173,14 @@ const actionModalButtons = document.getElementById('actionModalButtons');
 const actionModalModeButtons = document.getElementById('actionModalModeButtons');
 const decorBoundsToggle = document.getElementById('decorBoundsToggle');
 const listLoadedPropsBtn = document.getElementById('listLoadedPropsBtn');
+const decorTestSpawnBtn = document.getElementById('decorTestSpawnBtn');
 const decorDebugList = document.getElementById('decorDebugList');
 
 const lightingInputs = {
+  decorGlobalScale: document.getElementById('decor_global_scale'),
+  floorRepeat: document.getElementById('floor_repeat'),
+  wallRepeat: document.getElementById('wall_repeat'),
+  trimRepeat: document.getElementById('trim_repeat'),
   keyIntensity: document.getElementById('light_key_intensity'),
   fillIntensity: document.getElementById('light_fill_intensity'),
   rimIntensity: document.getElementById('light_rim_intensity'),
@@ -186,7 +191,22 @@ const lightingInputs = {
   fogDensity: document.getElementById('light_fog_density')
 };
 
+const LIGHTING_ONLY_KEYS = [
+  'keyIntensity',
+  'fillIntensity',
+  'rimIntensity',
+  'ambientIntensity',
+  'temperature',
+  'hdriIntensity',
+  'shadowDarkness',
+  'fogDensity'
+];
+
 const lightingValueLabels = {
+  decorGlobalScale: document.getElementById('decor_global_scale_val'),
+  floorRepeat: document.getElementById('floor_repeat_val'),
+  wallRepeat: document.getElementById('wall_repeat_val'),
+  trimRepeat: document.getElementById('trim_repeat_val'),
   keyIntensity: document.getElementById('light_key_intensity_val'),
   fillIntensity: document.getElementById('light_fill_intensity_val'),
   rimIntensity: document.getElementById('light_rim_intensity_val'),
@@ -585,6 +605,17 @@ const ENV_HDRI_CHOICES = {
     alt: '/assets/environments/_shared/hdri/wooden_studio_09_4k.exr'
   }
 };
+
+const DECOR_SCALE_STORAGE_PREFIX = 'texas42_decor_scale_';
+const DECOR_SCALE_STORAGE_SUFFIX = '_v1';
+const MATERIAL_REPEAT_STORAGE_PREFIX = 'texas42_material_repeat_';
+const MATERIAL_REPEAT_STORAGE_SUFFIX = '_v1';
+const envDecorScaleById = new Map();
+const envMaterialRepeatById = new Map();
+
+function defaultFloorRepeatForEnvironment(envId) {
+  return envId === 'casino_lounge' ? 10 : 14;
+}
 
 const LIGHTING_STORAGE_PREFIX = 'texas42_lighting_';
 const LIGHTING_STORAGE_SUFFIX = '_v1';
@@ -1537,6 +1568,14 @@ function lightingStorageKey(envId) {
   return `${LIGHTING_STORAGE_PREFIX}${String(envId || 'casino_lounge')}${LIGHTING_STORAGE_SUFFIX}`;
 }
 
+function decorScaleStorageKey(envId) {
+  return `${DECOR_SCALE_STORAGE_PREFIX}${String(envId || 'casino_lounge')}${DECOR_SCALE_STORAGE_SUFFIX}`;
+}
+
+function materialRepeatStorageKey(envId) {
+  return `${MATERIAL_REPEAT_STORAGE_PREFIX}${String(envId || 'casino_lounge')}${MATERIAL_REPEAT_STORAGE_SUFFIX}`;
+}
+
 function kelvinToRgb(kelvinInput) {
   const kelvin = Math.max(1000, Math.min(40000, Number(kelvinInput) || 5200));
   const temp = kelvin / 100;
@@ -1587,6 +1626,84 @@ function sanitizeLightingState(settings) {
   };
 }
 
+function sanitizeDecorScale(value) {
+  return clampValue(Number(value), 0.1, 10.0, 1.5);
+}
+
+function defaultMaterialRepeatState(envId) {
+  return {
+    floorRepeat: defaultFloorRepeatForEnvironment(envId),
+    wallRepeat: 4.5,
+    trimRepeat: 10
+  };
+}
+
+function sanitizeMaterialRepeatState(settings, envId = 'casino_lounge') {
+  const defaults = defaultMaterialRepeatState(envId);
+  return {
+    floorRepeat: clampValue(Number(settings?.floorRepeat), 1, 24, defaults.floorRepeat),
+    wallRepeat: clampValue(Number(settings?.wallRepeat), 1, 24, defaults.wallRepeat),
+    trimRepeat: clampValue(Number(settings?.trimRepeat), 1, 24, defaults.trimRepeat)
+  };
+}
+
+function loadDecorScaleForEnvironment(envId) {
+  const id = String(envId || 'casino_lounge');
+  if (envDecorScaleById.has(id)) {
+    return sanitizeDecorScale(envDecorScaleById.get(id));
+  }
+  let value = 1.5;
+  try {
+    const raw = localStorage.getItem(decorScaleStorageKey(id));
+    if (raw != null) {
+      value = sanitizeDecorScale(Number(raw));
+    } else {
+      localStorage.setItem(decorScaleStorageKey(id), String(value));
+    }
+  } catch {
+    value = 1.5;
+  }
+  envDecorScaleById.set(id, value);
+  return value;
+}
+
+function persistDecorScaleForEnvironment(envId, value) {
+  const id = String(envId || currentEnvironmentId || 'casino_lounge');
+  const safe = sanitizeDecorScale(value);
+  envDecorScaleById.set(id, safe);
+  localStorage.setItem(decorScaleStorageKey(id), String(safe));
+}
+
+function loadMaterialRepeatForEnvironment(envId) {
+  const id = String(envId || 'casino_lounge');
+  if (envMaterialRepeatById.has(id)) {
+    return sanitizeMaterialRepeatState(envMaterialRepeatById.get(id), id);
+  }
+  const defaults = defaultMaterialRepeatState(id);
+  let merged = { ...defaults };
+  try {
+    const raw = localStorage.getItem(materialRepeatStorageKey(id));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      merged = { ...defaults, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+    } else {
+      localStorage.setItem(materialRepeatStorageKey(id), JSON.stringify(defaults));
+    }
+  } catch {
+    merged = defaults;
+  }
+  const safe = sanitizeMaterialRepeatState(merged, id);
+  envMaterialRepeatById.set(id, safe);
+  return safe;
+}
+
+function persistMaterialRepeatForEnvironment(envId, value) {
+  const id = String(envId || currentEnvironmentId || 'casino_lounge');
+  const safe = sanitizeMaterialRepeatState(value, id);
+  envMaterialRepeatById.set(id, safe);
+  localStorage.setItem(materialRepeatStorageKey(id), JSON.stringify(safe));
+}
+
 function loadLightingForEnvironment(envId) {
   const id = String(envId || 'casino_lounge');
   if (envLightingStateById.has(id)) {
@@ -1621,18 +1738,31 @@ function persistLightingForEnvironment(envId) {
 
 function setLightingControlValues(settings) {
   const safe = sanitizeLightingState(settings);
-  for (const key of Object.keys(lightingInputs)) {
+  for (const key of LIGHTING_ONLY_KEYS) {
     const input = lightingInputs[key];
     const label = lightingValueLabels[key];
+    const value = Number(safe[key]);
     if (input) {
-      input.value = `${safe[key]}`;
+      input.value = `${value}`;
     }
     if (label) {
       label.textContent = key === 'temperature'
-        ? `${Math.round(safe[key])}`
-        : safe[key].toFixed(key === 'fogDensity' ? 3 : 2);
+        ? `${Math.round(value)}`
+        : value.toFixed(key === 'fogDensity' ? 3 : 2);
     }
   }
+
+  const envId = currentEnvironmentId || roomState?.environmentId || 'casino_lounge';
+  const decorScale = loadDecorScaleForEnvironment(envId);
+  const repeatState = loadMaterialRepeatForEnvironment(envId);
+  if (lightingInputs.decorGlobalScale) lightingInputs.decorGlobalScale.value = `${decorScale}`;
+  if (lightingValueLabels.decorGlobalScale) lightingValueLabels.decorGlobalScale.textContent = decorScale.toFixed(2);
+  if (lightingInputs.floorRepeat) lightingInputs.floorRepeat.value = `${repeatState.floorRepeat}`;
+  if (lightingValueLabels.floorRepeat) lightingValueLabels.floorRepeat.textContent = repeatState.floorRepeat.toFixed(2);
+  if (lightingInputs.wallRepeat) lightingInputs.wallRepeat.value = `${repeatState.wallRepeat}`;
+  if (lightingValueLabels.wallRepeat) lightingValueLabels.wallRepeat.textContent = repeatState.wallRepeat.toFixed(2);
+  if (lightingInputs.trimRepeat) lightingInputs.trimRepeat.value = `${repeatState.trimRepeat}`;
+  if (lightingValueLabels.trimRepeat) lightingValueLabels.trimRepeat.textContent = repeatState.trimRepeat.toFixed(2);
 }
 
 function applyLightingState(settings, { persist = false } = {}) {
@@ -4566,21 +4696,121 @@ const PROP_SCALE_OVERRIDES = {
   decorative_book_set_01_4k: 1.0
 };
 
-function targetHeightForPropFolder(folderName) {
+function getDecorCategory(folderName) {
   const folder = String(folderName || '').toLowerCase();
-  if (!folder) return 1.2;
-  if (folder.includes('bookshelf')) return 2.1;
-  if (folder.includes('shelves') || folder.includes('shelf')) return 2.0;
-  if (folder.includes('book_set')) return 0.25;
-  if (folder.includes('lightbulb')) return 0.15;
-  if (folder.includes('wall_lamp')) return 0.45;
-  if (folder.includes('lamp')) return 1.4;
-  if (folder.includes('picture_frame') || folder.includes('frame')) return 0.7;
-  if (folder.includes('table')) {
-    if (folder.includes('tall')) return 1.0;
-    return 0.75;
+  if (!folder) return 'default';
+  if (folder.includes('bookshelf')) return 'bookshelf';
+  if (folder.includes('shelves') || folder.includes('shelf')) return 'shelf';
+  if (folder.includes('book_set')) return 'book_set';
+  if (folder.includes('lightbulb')) return 'lightbulb';
+  if (folder.includes('wall_lamp')) return 'wall_lamp';
+  if (folder.includes('lamp')) return 'standing_lamp';
+  if (folder.includes('coffee_table')) return 'coffee_table';
+  if (folder.includes('side_table') && folder.includes('tall')) return 'tall_side_table';
+  if (folder.includes('table')) return 'side_table';
+  if (folder.includes('picture_frame') || folder.includes('hanging_picture_frame') || folder.includes('fancy_picture_frame') || folder.includes('frame')) return 'picture_frame';
+  return 'default';
+}
+
+function targetHeightForPropFolder(folderName, ref) {
+  const category = getDecorCategory(folderName);
+  const safeRef = Math.max(0.1, Number(ref) || 5);
+  switch (category) {
+    case 'bookshelf':
+    case 'shelf':
+      return safeRef * 0.55;
+    case 'wall_lamp':
+      return safeRef * 0.12;
+    case 'standing_lamp':
+      return safeRef * 0.35;
+    case 'tall_side_table':
+      return safeRef * 0.24;
+    case 'coffee_table':
+      return safeRef * 0.14;
+    case 'side_table':
+      return safeRef * 0.18;
+    case 'picture_frame':
+      return safeRef * 0.16;
+    case 'book_set':
+      return safeRef * 0.06;
+    case 'lightbulb':
+      return safeRef * 0.05;
+    default:
+      return safeRef * 0.20;
   }
-  return 1.2;
+}
+
+function isWallDecor(folderName) {
+  const category = getDecorCategory(folderName);
+  return category === 'wall_lamp' || category === 'picture_frame';
+}
+
+function snapPropToFloor(model, floorY = FLOOR_Y, pad = 0.01) {
+  const box = new THREE.Box3().setFromObject(model);
+  if (!Number.isFinite(box.min.y)) return;
+  model.position.y += (floorY + pad - box.min.y);
+}
+
+function alignPropToBackWall(model, backWallZ, pad = 0.01, faceIntoRoom = true) {
+  const box = new THREE.Box3().setFromObject(model);
+  if (!Number.isFinite(box.max.z)) return;
+  model.position.z += (backWallZ - pad - box.max.z);
+  if (faceIntoRoom) model.rotation.y = Math.PI;
+}
+
+function clampToRoom(model, leftX, rightX, nearZ, farZ) {
+  model.position.x = THREE.MathUtils.clamp(model.position.x, leftX, rightX);
+  model.position.z = THREE.MathUtils.clamp(model.position.z, nearZ, farZ);
+}
+
+function quantizeRightAngle(rad) {
+  return Math.round(rad / (Math.PI * 0.5)) * (Math.PI * 0.5);
+}
+
+function getDecorReferenceMetrics() {
+  const metrics = {
+    tableDiameter: 0,
+    chairHeight: 0,
+    avatarHeight: 0,
+    ref: 5
+  };
+
+  const tableNode = environmentGroup.getObjectByName('tableModel') || tableRoot;
+  if (tableNode) {
+    const box = new THREE.Box3().setFromObject(tableNode);
+    if (Number.isFinite(box.min.x) && Number.isFinite(box.max.x)) {
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      metrics.tableDiameter = Math.max(size.x, size.z);
+    }
+  }
+
+  const chairNode = chairSeatGroups.find((group) => group && group.children && group.children.length)?.children?.[0] || null;
+  if (chairNode) {
+    const box = new THREE.Box3().setFromObject(chairNode);
+    if (Number.isFinite(box.min.y) && Number.isFinite(box.max.y)) {
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      metrics.chairHeight = size.y;
+    }
+  }
+
+  const avatarNode = avatarSeatGroups.find((group) => group && group.children && group.children.length) || null;
+  if (avatarNode) {
+    const box = new THREE.Box3().setFromObject(avatarNode);
+    if (Number.isFinite(box.min.y) && Number.isFinite(box.max.y)) {
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      metrics.avatarHeight = size.y;
+    }
+  }
+
+  metrics.ref = Number.isFinite(metrics.tableDiameter) && metrics.tableDiameter > 0.001
+    ? metrics.tableDiameter
+    : (Number.isFinite(metrics.chairHeight) && metrics.chairHeight > 0.001
+      ? metrics.chairHeight
+      : (Number.isFinite(metrics.avatarHeight) && metrics.avatarHeight > 0.001 ? metrics.avatarHeight : 5.0));
+  return metrics;
 }
 
 async function fetchSharedPropCatalog() {
@@ -4670,13 +4900,21 @@ async function loadDecorModelFromCatalogEntry(entry) {
   }
 }
 
-async function addEnvironmentDecor(roomRoot, environmentId) {
+async function addEnvironmentDecor(roomRoot, environmentId, roomLayout = {}) {
   const layout = ENV_DECOR_LAYOUTS[environmentId] || [];
   const catalog = await fetchSharedPropCatalog();
   const byFolder = new Map((catalog || []).map((entry) => [String(entry.folder), entry]));
   decorDebugState.props = [];
   decorDebugState.failures = [];
   decorDebugState.requested = layout.length;
+  const decorGlobalScale = loadDecorScaleForEnvironment(environmentId);
+  const refMetrics = getDecorReferenceMetrics();
+  console.log('[decor] ref', {
+    tableDiameter: Number(refMetrics.tableDiameter?.toFixed?.(4) || 0),
+    chairHeight: Number(refMetrics.chairHeight?.toFixed?.(4) || 0),
+    avatarHeight: Number(refMetrics.avatarHeight?.toFixed?.(4) || 0),
+    ref: Number(refMetrics.ref?.toFixed?.(4) || 0)
+  });
   const missingExpected = SHARED_PROP_FOLDERS.filter((folder) => !byFolder.has(folder));
   if (missingExpected.length) {
     console.warn(`[decor] missing expected prop folders: ${missingExpected.join(', ')}`);
@@ -4712,24 +4950,37 @@ async function addEnvironmentDecor(roomRoot, environmentId) {
     tmpBox.setFromObject(model);
     if (Number.isFinite(tmpBox.min.y) && Number.isFinite(tmpBox.max.y)) {
       const beforeHeight = Math.max(tmpBox.max.y - tmpBox.min.y, 0.0001);
-      const targetHeight = targetHeightForPropFolder(spec.folder);
+      const targetHeight = targetHeightForPropFolder(spec.folder, refMetrics.ref);
       const autoScale = THREE.MathUtils.clamp(targetHeight / beforeHeight, 0.05, 50);
       const overrideScale = Number(PROP_SCALE_OVERRIDES[String(spec.folder)] ?? 1);
-      const finalScale = autoScale * overrideScale;
+      const finalScale = autoScale * overrideScale * decorGlobalScale;
       model.scale.multiplyScalar(finalScale);
       if (!loggedDecorScaleFolders.has(String(spec.folder))) {
         loggedDecorScaleFolders.add(String(spec.folder));
         console.log('[decor] scaled', spec.folder, {
           beforeH: Number(beforeHeight.toFixed(4)),
           target: Number(targetHeight.toFixed(4)),
-          scale: Number(finalScale.toFixed(4))
+          scale: Number(finalScale.toFixed(4)),
+          decorScale: Number(decorGlobalScale.toFixed(4))
         });
       }
       model.updateWorldMatrix(true, true);
-      tmpBox.setFromObject(model);
-      if (Number.isFinite(tmpBox.min.y) && tmpBox.min.y < FLOOR_Y + 0.01) {
-        model.position.y += (FLOOR_Y + 0.01) - tmpBox.min.y;
+      const category = getDecorCategory(spec.folder);
+      const wallItem = isWallDecor(spec.folder);
+      if (wallItem) {
+        const backWallZ = Number(roomLayout.backWallZ ?? -(Number(roomLayout.depth || 20) * 0.5));
+        alignPropToBackWall(model, backWallZ, 0.01, true);
+      } else {
+        snapPropToFloor(model, FLOOR_Y, 0.01);
       }
+      if (category === 'shelf' || category === 'bookshelf' || category === 'side_table' || category === 'tall_side_table' || category === 'coffee_table') {
+        model.rotation.y = quantizeRightAngle(model.rotation.y);
+      }
+      const pad = 0.3;
+      const halfW = Number(roomLayout.width || 18) * 0.5;
+      const halfD = Number(roomLayout.depth || 20) * 0.5;
+      clampToRoom(model, -halfW + pad, halfW - pad, -halfD + pad, halfD - pad);
+      snapPropToFloor(model, FLOOR_Y, 0.01);
     }
     decorRoot.add(model);
     decorDebugState.props.push({
@@ -4739,7 +4990,7 @@ async function addEnvironmentDecor(roomRoot, environmentId) {
     });
   }
 
-  updateDecorStatusText(`Decor: ${decorDebugState.props.length}/${decorDebugState.requested} loaded (${environmentId})`);
+  updateDecorStatusText(`Decor: ${decorDebugState.props.length}/${decorDebugState.requested} loaded (${environmentId}) | scale ${decorGlobalScale.toFixed(2)}`);
   if (decorDebugList) {
     const loadedLines = decorDebugState.props.map((entry) => `${entry.name} (${entry.modelUrl || 'NO_MODEL_URL'})`);
     const failedLines = decorDebugState.failures.map((line) => `FAIL ${line}`);
@@ -4839,9 +5090,10 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   addCasinoTrim(roomRoot, roomWidth, roomDepth, wallHeight, trimMaterial);
   themeGroup.add(roomRoot);
 
-  const floorRepeat = environmentId === 'casino_lounge' ? [10, 12] : [14, 14];
-  const wallRepeat = [5, 4];
-  const trimRepeat = [10, 3];
+  const repeatState = loadMaterialRepeatForEnvironment(environmentId);
+  const floorRepeat = [Number(repeatState.floorRepeat), Number(repeatState.floorRepeat)];
+  const wallRepeat = [Number(repeatState.wallRepeat), Math.max(1, Number(repeatState.wallRepeat) - 1)];
+  const trimRepeat = [Number(repeatState.trimRepeat), 2];
   const envRoot = environmentRootFor(entry);
   const envStatus = {
     envId: environmentId,
@@ -4914,7 +5166,12 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   if (hdriTex) {
     scene.environment = hdriTex;
   }
-  await addEnvironmentDecor(roomRoot, environmentId);
+  await addEnvironmentDecor(roomRoot, environmentId, {
+    width: roomWidth,
+    depth: roomDepth,
+    wallHeight,
+    backWallZ: -(roomDepth * 0.5)
+  });
 
   if (token !== environmentApplyToken) return;
   const floorBaseOk = !!floorBaseTex;
@@ -6420,14 +6677,44 @@ function ensureButtons() {
     event.preventDefault();
   });
 
-  lightingInputs.keyIntensity?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
-  lightingInputs.fillIntensity?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
-  lightingInputs.rimIntensity?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
-  lightingInputs.ambientIntensity?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
-  lightingInputs.temperature?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
-  lightingInputs.hdriIntensity?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
-  lightingInputs.shadowDarkness?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
-  lightingInputs.fogDensity?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
+  for (const key of LIGHTING_ONLY_KEYS) {
+    lightingInputs[key]?.addEventListener('input', () => updateLightingFromControls({ persist: true }));
+  }
+
+  lightingInputs.decorGlobalScale?.addEventListener('input', () => {
+    const envId = currentEnvironmentId || roomState?.environmentId || environmentSelect.value || 'casino_lounge';
+    const value = sanitizeDecorScale(lightingInputs.decorGlobalScale.value);
+    persistDecorScaleForEnvironment(envId, value);
+    setLightingControlValues(activeLightingState || makeDefaultLightingState(envId));
+    applyEnvironment(envId, { force: true });
+  });
+
+  lightingInputs.floorRepeat?.addEventListener('input', () => {
+    const envId = currentEnvironmentId || roomState?.environmentId || environmentSelect.value || 'casino_lounge';
+    const repeats = loadMaterialRepeatForEnvironment(envId);
+    repeats.floorRepeat = clampValue(Number(lightingInputs.floorRepeat.value), 1, 24, defaultFloorRepeatForEnvironment(envId));
+    persistMaterialRepeatForEnvironment(envId, repeats);
+    setLightingControlValues(activeLightingState || makeDefaultLightingState(envId));
+    applyEnvironment(envId, { force: true });
+  });
+
+  lightingInputs.wallRepeat?.addEventListener('input', () => {
+    const envId = currentEnvironmentId || roomState?.environmentId || environmentSelect.value || 'casino_lounge';
+    const repeats = loadMaterialRepeatForEnvironment(envId);
+    repeats.wallRepeat = clampValue(Number(lightingInputs.wallRepeat.value), 1, 24, 4.5);
+    persistMaterialRepeatForEnvironment(envId, repeats);
+    setLightingControlValues(activeLightingState || makeDefaultLightingState(envId));
+    applyEnvironment(envId, { force: true });
+  });
+
+  lightingInputs.trimRepeat?.addEventListener('input', () => {
+    const envId = currentEnvironmentId || roomState?.environmentId || environmentSelect.value || 'casino_lounge';
+    const repeats = loadMaterialRepeatForEnvironment(envId);
+    repeats.trimRepeat = clampValue(Number(lightingInputs.trimRepeat.value), 1, 24, 10);
+    persistMaterialRepeatForEnvironment(envId, repeats);
+    setLightingControlValues(activeLightingState || makeDefaultLightingState(envId));
+    applyEnvironment(envId, { force: true });
+  });
 
   resetLightingBtn?.addEventListener('click', () => {
     resetLightingForCurrentEnvironment();
@@ -6516,6 +6803,40 @@ function ensureButtons() {
     const loaded = decorDebugState.props.map((entry) => `${entry.name} (${entry.modelUrl || 'NO_MODEL_URL'})`);
     const failed = decorDebugState.failures.map((line) => `FAIL ${line}`);
     decorDebugList.textContent = [...loaded, ...failed].join('\n');
+  });
+
+  decorTestSpawnBtn?.addEventListener('click', async () => {
+    const catalog = await fetchSharedPropCatalog();
+    const entry = catalog.find((item) => item.folder === 'side_table_01_4k') || null;
+    if (!entry?.modelUrl) {
+      logMessage('Decor test spawn failed: side_table_01_4k not found.', 2200);
+      return;
+    }
+    const model = await loadDecorModelFromCatalogEntry(entry);
+    if (!model) {
+      logMessage('Decor test spawn failed: GLB load error.', 2200);
+      return;
+    }
+    const decorRoot = themeGroup.getObjectByName('decorTestRoot') || new THREE.Group();
+    decorRoot.name = 'decorTestRoot';
+    if (!decorRoot.parent) themeGroup.add(decorRoot);
+    clearGroup(decorRoot);
+    model.position.set(0, FLOOR_Y, -6);
+    model.scale.setScalar(1);
+    decorRoot.add(model);
+    const ref = getDecorReferenceMetrics().ref;
+    const boxBefore = new THREE.Box3().setFromObject(model);
+    const h = Math.max(boxBefore.max.y - boxBefore.min.y, 0.0001);
+    const scale = THREE.MathUtils.clamp((ref * 0.18) / h, 0.05, 200) * loadDecorScaleForEnvironment(currentEnvironmentId || 'casino_lounge');
+    model.scale.multiplyScalar(scale);
+    snapPropToFloor(model, FLOOR_Y, 0.01);
+    const boxAfter = new THREE.Box3().setFromObject(model);
+    console.log('[decor] test spawn side_table_01_4k bbox', {
+      min: boxAfter.min.toArray(),
+      max: boxAfter.max.toArray(),
+      scale: Number(scale.toFixed(4))
+    });
+    logMessage('Decor test spawn: side_table_01_4k', 1800);
   });
 
   panelToggle.addEventListener('click', () => {

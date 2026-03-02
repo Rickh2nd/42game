@@ -213,6 +213,26 @@
         <section id="section-lighting" class="panelSection">
           <h2>LIGHTING</h2>
           <div class="viewControl">
+            <label for="decor_global_scale">Decor Global Scale</label>
+            <input id="decor_global_scale" type="range" min="0.10" max="10.00" step="0.05" />
+            <span id="decor_global_scale_val" class="viewVal">1.50</span>
+          </div>
+          <div class="viewControl">
+            <label for="floor_repeat">Floor Repeat</label>
+            <input id="floor_repeat" type="range" min="1.00" max="24.00" step="0.25" />
+            <span id="floor_repeat_val" class="viewVal">10.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="wall_repeat">Wall Repeat</label>
+            <input id="wall_repeat" type="range" min="1.00" max="24.00" step="0.25" />
+            <span id="wall_repeat_val" class="viewVal">4.00</span>
+          </div>
+          <div class="viewControl">
+            <label for="trim_repeat">Trim Repeat</label>
+            <input id="trim_repeat" type="range" min="1.00" max="24.00" step="0.25" />
+            <span id="trim_repeat_val" class="viewVal">10.00</span>
+          </div>
+          <div class="viewControl">
             <label for="light_key_intensity">Key Intensity</label>
             <input id="light_key_intensity" type="range" min="0.00" max="10.00" step="0.01" />
             <span id="light_key_intensity_val" class="viewVal">0.00</span>
@@ -452,6 +472,7 @@
           </div>
           <div class="buttonRow">
             <button id="listLoadedPropsBtn">List Loaded Props</button>
+            <button id="decorTestSpawnBtn">Decor Test Spawn</button>
           </div>
           <div id="decorDebugList" class="smallText">No props loaded yet.</div>
         </section>
