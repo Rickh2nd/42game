@@ -4,6 +4,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
@@ -49,6 +50,7 @@ const TABLE_HUD_STORAGE_KEY = 'texas42_table_hud_v1';
 const BETTING_MODAL_STORAGE_KEY = 'texas42_bet_modal_pos_v1';
 const BETTING_MODAL_STORAGE_KEY_LEGACY = 'texas42_betting_modal_v1';
 const CHIP_WIDGET_STORAGE_KEY = 'texas42_chip_widget_pos_v1';
+const HDRI_VARIANT_STORAGE_PREFIX = 'texas42_hdri_variant_';
 const MUTE_STORAGE_KEY = 'texas42_mute_v1';
 const PLAYER_ID_STORAGE_KEY = 'texas42_player_id';
 const CLIENT_VERSION = '1.0.0';
@@ -78,14 +80,25 @@ const bidTrayTimer = document.getElementById('bidTrayTimer');
 const bidTrayStatus = document.getElementById('bidTrayStatus');
 const bidTrayButtons = document.getElementById('bidTrayButtons');
 const bidTrayPassBtn = document.getElementById('bidTrayPassBtn');
+const modeTray = document.getElementById('modeTray');
+const modeTrayTitle = document.getElementById('modeTrayTitle');
+const modeTrayStatus = document.getElementById('modeTrayStatus');
+const modeTrayButtons = document.getElementById('modeTrayButtons');
+const trumpTray = document.getElementById('trumpTray');
+const trumpTrayTitle = document.getElementById('trumpTrayTitle');
+const trumpTrayStatus = document.getElementById('trumpTrayStatus');
+const trumpTrayButtons = document.getElementById('trumpTrayButtons');
+const chooserWaitBanner = document.getElementById('chooserWaitBanner');
 const chipTray = document.getElementById('chipTray');
 const chipTrayTitle = document.getElementById('chipTrayTitle');
 const chipTrayBody = document.getElementById('chipTrayBody');
 const chipTrayPotText = document.getElementById('chipTrayPotText');
 const chipTrayButtons = document.getElementById('chipTrayButtons');
-const chipBidAmountInput = document.getElementById('chipBidAmountInput');
-const chipMinusBtn = document.getElementById('chipMinusBtn');
-const chipPlusBtn = document.getElementById('chipPlusBtn');
+const chipInc1Btn = document.getElementById('chipInc1Btn');
+const chipInc5Btn = document.getElementById('chipInc5Btn');
+const chipInc10Btn = document.getElementById('chipInc10Btn');
+const chipInc20Btn = document.getElementById('chipInc20Btn');
+const chipYourBetText = document.getElementById('chipYourBetText');
 const chipTotalsWidget = document.getElementById('chipTotalsWidget');
 const chipTotalsDragHandle = document.getElementById('chipTotalsDragHandle');
 const chipTotalsList = document.getElementById('chipTotalsList');
@@ -112,6 +125,7 @@ const debugTableBoundsToggle = document.getElementById('debugTableBoundsToggle')
 const spawnTestDominoBtn = document.getElementById('spawnTestDominoBtn');
 const tableDominoDebugReadout = document.getElementById('tableDominoDebugReadout');
 const environmentSelect = document.getElementById('environmentSelect');
+const hdriVariantSelect = document.getElementById('hdriVariantSelect');
 const environmentPreview = document.getElementById('environmentPreview');
 const environmentStateText = document.getElementById('environmentStateText');
 const environmentLoadText = document.getElementById('environmentLoadText');
@@ -460,7 +474,9 @@ let environmentLoadDetail = '';
 const decorDebugState = {
   props: [],
   helpers: [],
-  sharedCatalog: null
+  sharedCatalog: null,
+  failures: [],
+  requested: 0
 };
 let sharedPropCatalogLogged = false;
 let showDecorBounds = false;
@@ -542,6 +558,32 @@ const DEFAULT_CHIP_WIDGET_SETTINGS = {
   offsetY: 0
 };
 const chipWidgetSettings = { ...DEFAULT_CHIP_WIDGET_SETTINGS };
+const DEFAULT_HDRI_VARIANT = 'primary';
+let chipBetDraftAmount = 0;
+const hdriVariantByEnv = new Map();
+
+const ENV_HDRI_CHOICES = {
+  casino_lounge: {
+    primary: '/assets/environments/_shared/hdri/anniversary_lounge_4k.exr',
+    alt: '/assets/environments/_shared/hdri/wooden_lounge_4k.exr'
+  },
+  spooky_parlor: {
+    primary: '/assets/environments/_shared/hdri/kiara_interior_4k.exr',
+    alt: '/assets/environments/_shared/hdri/indoor_pool_4k.exr'
+  },
+  rustic_tavern: {
+    primary: '/assets/environments/_shared/hdri/small_workshop_4k.exr',
+    alt: '/assets/environments/_shared/hdri/wooden_studio_01_4k.exr'
+  },
+  modern_suite: {
+    primary: '/assets/environments/_shared/hdri/de_balie_4k.exr',
+    alt: '/assets/environments/_shared/hdri/aft_lounge_4k.exr'
+  },
+  neon_arcade: {
+    primary: '/assets/environments/_shared/hdri/wooden_studio_11_4k.exr',
+    alt: '/assets/environments/_shared/hdri/wooden_studio_09_4k.exr'
+  }
+};
 
 const LIGHTING_STORAGE_PREFIX = 'texas42_lighting_';
 const LIGHTING_STORAGE_SUFFIX = '_v1';
@@ -1121,6 +1163,46 @@ function loadStoredChipWidgetSettings() {
   }
   localStorage.removeItem(BETTING_MODAL_STORAGE_KEY_LEGACY);
   applyChipWidgetSettings();
+}
+
+function sanitizeHdriVariant(value) {
+  return value === 'alt' ? 'alt' : 'primary';
+}
+
+function hdriVariantStorageKey(environmentId) {
+  return `${HDRI_VARIANT_STORAGE_PREFIX}${String(environmentId || '').trim()}`;
+}
+
+function getHdriVariantForEnvironment(environmentId) {
+  const envId = String(environmentId || '').trim();
+  if (!envId) return DEFAULT_HDRI_VARIANT;
+  if (!ENV_HDRI_CHOICES[envId]) return DEFAULT_HDRI_VARIANT;
+  if (hdriVariantByEnv.has(envId)) {
+    return hdriVariantByEnv.get(envId);
+  }
+  let variant = DEFAULT_HDRI_VARIANT;
+  try {
+    const raw = localStorage.getItem(hdriVariantStorageKey(envId));
+    if (raw) variant = sanitizeHdriVariant(raw);
+  } catch {
+    variant = DEFAULT_HDRI_VARIANT;
+  }
+  hdriVariantByEnv.set(envId, variant);
+  return variant;
+}
+
+function setHdriVariantForEnvironment(environmentId, variant, { persist = true } = {}) {
+  const envId = String(environmentId || '').trim();
+  if (!envId || !ENV_HDRI_CHOICES[envId]) return;
+  const safeVariant = sanitizeHdriVariant(variant);
+  hdriVariantByEnv.set(envId, safeVariant);
+  if (persist) {
+    try {
+      localStorage.setItem(hdriVariantStorageKey(envId), safeVariant);
+    } catch {
+      // ignore storage failures
+    }
+  }
 }
 
 function setMuted(value, { persist = false } = {}) {
@@ -2146,6 +2228,9 @@ function updatePanelAutoBehavior() {
   if (!roomState) {
     setPanelOpen(true);
     updateActionModal();
+    closeModeTray();
+    closeTrumpTray();
+    chooserWaitBanner?.classList.add('hidden');
     return;
   }
 
@@ -2170,6 +2255,7 @@ function updatePanelAutoBehavior() {
 
   updateActionModal();
   updateBidTray();
+  updateModeTrumpTrays();
   updateChipTray();
   lastPhase = roomState.phase;
 }
@@ -2270,10 +2356,24 @@ function closeBidTray() {
   bidTrayButtons?.replaceChildren();
 }
 
+function closeModeTray() {
+  if (!modeTray) return;
+  modeTray.classList.add('hidden');
+  modeTrayButtons?.replaceChildren();
+}
+
+function closeTrumpTray() {
+  if (!trumpTray) return;
+  trumpTray.classList.add('hidden');
+  trumpTrayButtons?.replaceChildren();
+}
+
 function closeChipTray() {
   if (!chipTray) return;
   chipTray.classList.add('hidden');
   chipTrayButtons?.replaceChildren();
+  chipBetDraftAmount = 0;
+  if (chipYourBetText) chipYourBetText.textContent = 'Your Bet: $0';
 }
 
 function createActionButton(label, onClick, { disabled = false, className = '' } = {}) {
@@ -2287,39 +2387,33 @@ function createActionButton(label, onClick, { disabled = false, className = '' }
 }
 
 function updateActionModal() {
-  if (!actionModal || !actionModalTitle || !actionModalBody || !actionModalButtons || !actionModalModeButtons) {
-    return;
-  }
+  closeActionModal();
+}
 
-  if (!roomState || !isConnected()) {
-    closeActionModal();
-    return;
-  }
+function updateModeTrumpTrays() {
+  if (!modeTray || !trumpTray || !chooserWaitBanner) return;
+
+  closeModeTray();
+  closeTrumpTray();
+  chooserWaitBanner.classList.add('hidden');
+
+  if (!roomState || !isConnected()) return;
 
   const phase = roomState.phase;
-  if (phase === PHASES.BETTING || phase === PHASES.BIDDING) {
-    closeActionModal();
-    return;
-  }
   const canChooseMode = phase === PHASES.CHOOSE_MODE && localIsBidder();
   const canChooseTrump = phase === PHASES.CHOOSE_TRUMP && localIsBidder() && roomState.mode === MODES.TRUMPS;
-  const shouldShow = phase === PHASES.CHOOSE_MODE || phase === PHASES.CHOOSE_TRUMP;
-  if (!shouldShow) {
-    closeActionModal();
-    return;
-  }
-
-  actionModal.classList.remove('hidden');
-  actionModalButtons.replaceChildren();
-  actionModalModeButtons.replaceChildren();
+  const waitingSeat = Number.isInteger(roomState.bidderSeat) ? roomState.bidderSeat + 1 : '-';
 
   if (phase === PHASES.CHOOSE_MODE) {
-    actionModalTitle.textContent = 'Choose Mode';
     if (!canChooseMode) {
-      actionModalBody.textContent = `Waiting for Seat ${Number(roomState.bidderSeat) + 1} to choose mode...`;
+      chooserWaitBanner.textContent = `Waiting for bidder (Seat ${waitingSeat}) to choose mode...`;
+      chooserWaitBanner.classList.remove('hidden');
       return;
     }
-    actionModalBody.textContent = 'Select the hand mode.';
+    modeTray.classList.remove('hidden');
+    modeTrayTitle.textContent = 'Choose Mode';
+    modeTrayStatus.textContent = 'Select hand mode for this hand.';
+    modeTrayButtons.replaceChildren();
     const modeDefs = [
       { id: MODES.TRUMPS, label: 'TRUMPS' },
       { id: MODES.FOLLOW_ME, label: 'FOLLOW ME' },
@@ -2329,29 +2423,30 @@ function updateActionModal() {
       const btn = createActionButton(modeDef.label, () => {
         sendAction('chooseMode', { mode: modeDef.id });
         forceClosePanel = true;
-        closeActionModal();
         updatePanelAutoBehavior();
       });
-      actionModalModeButtons.appendChild(btn);
+      modeTrayButtons.appendChild(btn);
     }
     return;
   }
 
   if (phase === PHASES.CHOOSE_TRUMP) {
-    actionModalTitle.textContent = 'Choose Trump';
     if (!canChooseTrump) {
-      actionModalBody.textContent = `Waiting for Seat ${Number(roomState.bidderSeat) + 1} to choose trump...`;
+      chooserWaitBanner.textContent = `Waiting for bidder (Seat ${waitingSeat}) to choose trump...`;
+      chooserWaitBanner.classList.remove('hidden');
       return;
     }
-    actionModalBody.textContent = 'Select trump number.';
+    trumpTray.classList.remove('hidden');
+    trumpTrayTitle.textContent = 'Choose Trump Number';
+    trumpTrayStatus.textContent = 'Pick trump suit number (0-6).';
+    trumpTrayButtons.replaceChildren();
     for (let trump = 0; trump <= 6; trump += 1) {
       const btn = createActionButton(String(trump), () => {
         sendAction('chooseTrump', { trumpSuit: trump });
         forceClosePanel = true;
-        closeActionModal();
         updatePanelAutoBehavior();
       });
-      actionModalButtons.appendChild(btn);
+      trumpTrayButtons.appendChild(btn);
     }
   }
 }
@@ -2490,9 +2585,15 @@ function updateChipTray() {
   const isPending = Number.isInteger(localSeat) && myStatus === 'pending';
 
   chipTray.classList.remove('hidden');
-  chipTrayTitle.textContent = 'Chip Betting';
-  chipTrayPotText.textContent = `Hand ${Number(betting.handId || roomState.handNumber || 0)} | Base ${baseAmount} | Current ${currentBid} | Pot ${Number(betting.pot || 0)} | Waiting ${remaining}`;
+  chipTrayTitle.textContent = 'Dollar Betting';
+  chipTrayPotText.textContent = `Hand ${Number(betting.handId || roomState.handNumber || 0)} | Base $${baseAmount} | Current $${currentBid} | Pot $${Number(betting.pot || 0)} | Waiting ${remaining}`;
   chipTrayButtons.replaceChildren();
+  const incrementButtons = [chipInc1Btn, chipInc5Btn, chipInc10Btn, chipInc20Btn].filter(Boolean);
+  incrementButtons.forEach((btn) => { btn.disabled = !isPending; });
+  chipBetDraftAmount = Math.max(0, Number(chipBetDraftAmount || 0));
+  if (chipYourBetText) {
+    chipYourBetText.textContent = `Your Bet: $${chipBetDraftAmount}`;
+  }
 
   if (!Number.isInteger(localSeat)) {
     chipTrayBody.textContent = 'You are spectating. Waiting for bets...';
@@ -2501,15 +2602,16 @@ function updateChipTray() {
 
   if (!isPending) {
     const statusText = myStatus === 'called' ? 'CALLED' : 'FOLDED';
-    chipTrayBody.textContent = `Waiting for other players... Your choice: ${statusText} | Your wager: ${myWager}`;
+    chipTrayBody.textContent = `Waiting for other players... Your choice: ${statusText} | Your wager: $${myWager}`;
     return;
   }
-
-  let bidAmount = Math.max(baseAmount, Number(chipBidAmountInput?.value || currentBid || baseAmount));
-  if (chipBidAmountInput) {
-    chipBidAmountInput.value = `${bidAmount}`;
+  chipTrayBody.textContent = `Seat ${localSeat + 1}: wager $${myWager}. Current required bet: $${currentBid}.`;
+  if (chipBetDraftAmount <= 0) {
+    chipBetDraftAmount = baseAmount;
   }
-  chipTrayBody.textContent = `Seat ${localSeat + 1}: wager ${myWager}. Current required bet: ${currentBid}.`;
+  if (chipYourBetText) {
+    chipYourBetText.textContent = `Your Bet: $${chipBetDraftAmount}`;
+  }
 
   const sendBetDecision = async (decision, amount = null) => {
     const payload = amount == null ? { decision } : { decision, amount: Number(amount) };
@@ -2521,28 +2623,26 @@ function updateChipTray() {
     return true;
   };
 
-  chipMinusBtn.onclick = () => {
-    bidAmount = Math.max(1, Number(chipBidAmountInput?.value || bidAmount) - 1);
-    if (chipBidAmountInput) chipBidAmountInput.value = `${bidAmount}`;
+  const setDraftAmount = (nextAmount) => {
+    chipBetDraftAmount = Math.max(1, Math.round(Number(nextAmount) || baseAmount));
+    if (chipYourBetText) {
+      chipYourBetText.textContent = `Your Bet: $${chipBetDraftAmount}`;
+    }
   };
-  chipPlusBtn.onclick = () => {
-    bidAmount = Math.max(1, Number(chipBidAmountInput?.value || bidAmount) + 1);
-    if (chipBidAmountInput) chipBidAmountInput.value = `${bidAmount}`;
-  };
-  chipBidAmountInput.onchange = () => {
-    bidAmount = Math.max(1, Number(chipBidAmountInput.value || baseAmount));
-    chipBidAmountInput.value = `${bidAmount}`;
-  };
+  chipInc1Btn.onclick = () => setDraftAmount(chipBetDraftAmount + 1);
+  chipInc5Btn.onclick = () => setDraftAmount(chipBetDraftAmount + 5);
+  chipInc10Btn.onclick = () => setDraftAmount(chipBetDraftAmount + 10);
+  chipInc20Btn.onclick = () => setDraftAmount(chipBetDraftAmount + 20);
 
-  const bidBtn = createActionButton(`Bid ${bidAmount}`, async () => {
-    const value = Math.max(1, Number(chipBidAmountInput?.value || bidAmount));
+  const bidBtn = createActionButton(`Bet $${chipBetDraftAmount}`, async () => {
+    const value = Math.max(1, Math.round(chipBetDraftAmount));
     await sendBetDecision('bid', value);
   });
-  const raiseBtn = createActionButton('Raise', async () => {
-    const value = Math.max(currentBid + 1, Number(chipBidAmountInput?.value || (currentBid + 1)));
+  const raiseBtn = createActionButton('Raise (+$5)', async () => {
+    const value = Math.max(currentBid + 5, Math.round(chipBetDraftAmount || 0));
     await sendBetDecision('raise', value);
   });
-  const callBtn = createActionButton(`Call (${currentBid})`, async () => {
+  const callBtn = createActionButton(`Call $${currentBid}`, async () => {
     await sendBetDecision('call');
   });
   const foldBtn = createActionButton('Fold', async () => {
@@ -2563,12 +2663,12 @@ function updateChipTotalsWidget() {
   chipTotalsWidget.classList.remove('hidden');
   chipTotalsList.replaceChildren();
   const betting = currentBettingState();
-  chipTotalsPot.textContent = `Pot: ${Number(betting?.pot || 0)}`;
+  chipTotalsPot.textContent = `Pot: $${Number(betting?.pot || 0)}`;
   for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
     const seat = roomState.seats?.[seatIndex];
     const chips = Number(roomState.sessionBankroll?.[String(seatIndex)] ?? 0);
     const line = document.createElement('div');
-    line.textContent = `${seat?.name || `Seat ${seatIndex + 1}`}: ${chips}`;
+    line.textContent = `${seat?.name || `Seat ${seatIndex + 1}`}: $${chips}`;
     chipTotalsList.appendChild(line);
   }
 }
@@ -2619,7 +2719,7 @@ function updateBettingControls() {
       bettingStateText.textContent = 'Betting Off';
     } else if (betting?.isOpen) {
       const waiting = Object.values(betting.responses || {}).filter((value) => value === 'pending').length;
-      bettingStateText.textContent = `Betting Open | Pot ${Number(betting.pot || 0)} | Waiting ${waiting}`;
+      bettingStateText.textContent = `Betting Open | Pot $${Number(betting.pot || 0)} | Waiting ${waiting}`;
     } else {
       bettingStateText.textContent = 'Betting On (next hand if already playing)';
     }
@@ -2636,7 +2736,7 @@ function updateBettingControls() {
       const seat = roomState.seats?.[seatIndex];
       const chips = Number(roomState.sessionBankroll?.[String(seatIndex)] ?? 0);
       const line = document.createElement('div');
-      line.textContent = `Seat ${seatIndex + 1} (${seat?.name || `Seat ${seatIndex + 1}`}): ${chips}`;
+      line.textContent = `Seat ${seatIndex + 1} (${seat?.name || `Seat ${seatIndex + 1}`}): $${chips}`;
       bettingTotals.appendChild(line);
     }
   }
@@ -4101,8 +4201,8 @@ function mapRoomAssets(files, environmentId) {
   const normalTags = ['normal', '_nrm', '_n'];
   const roughTags = ['roughness', 'rough'];
   const aoTags = ['ambientocclusion', 'ambient_occlusion', 'ao'];
-  const hdriFiles = files.filter((file) => file.toLowerCase().includes('/hdri/') && file.toLowerCase().endsWith('.hdr'));
-  const preferredCasinoHdr = hdriFiles.find((file) => file.toLowerCase().includes('anniversary_lounge_4k.hdr'));
+  const hdriFiles = files.filter((file) => file.toLowerCase().includes('/hdri/') && file.toLowerCase().endsWith('.exr'));
+  const preferredCasinoHdr = hdriFiles.find((file) => file.toLowerCase().includes('anniversary_lounge_4k.exr'));
   const hdri = (environmentId === 'casino_lounge' && preferredCasinoHdr) ? preferredCasinoHdr : (hdriFiles[0] || '');
   const props = files.filter((file) => {
     const low = file.toLowerCase();
@@ -4177,7 +4277,15 @@ async function loadEnvironmentHdri(url) {
 
   const task = (async () => {
     try {
-      const tex = await new RGBELoader().loadAsync(url);
+      const lower = String(url).toLowerCase();
+      let tex = null;
+      if (lower.endsWith('.exr')) {
+        tex = await new EXRLoader().loadAsync(url);
+      } else if (lower.endsWith('.hdr')) {
+        tex = await new RGBELoader().loadAsync(url);
+      } else {
+        return null;
+      }
       const pmrem = pmremGenerator.fromEquirectangular(tex).texture;
       tex.dispose();
       return pmrem;
@@ -4335,17 +4443,25 @@ async function loadExpectedMaterialSet(envRoot, dirCandidates, repeat, kind, cat
 
 async function chooseEnvironmentHdri(envRoot, environmentId, catalog) {
   const candidates = [];
-  if (environmentId === 'casino_lounge') {
-    candidates.push(
-      `${envRoot}/hdri/anniversary_lounge_4k.hdr`,
-      `${envRoot}/hdri/wooden_lounge_4k.hdr`
-    );
+  const envChoices = ENV_HDRI_CHOICES[environmentId] || null;
+  if (envChoices) {
+    const selected = getHdriVariantForEnvironment(environmentId);
+    const preferred = selected === 'alt' ? envChoices.alt : envChoices.primary;
+    const alternate = selected === 'alt' ? envChoices.primary : envChoices.alt;
+    if (preferred) candidates.push(preferred);
+    if (alternate) candidates.push(alternate);
   }
   for (const file of catalog || []) {
     const low = String(file).toLowerCase();
-    if (low.includes('/hdri/') && low.endsWith('.hdr')) {
+    if (low.includes('/hdri/') && low.endsWith('.exr')) {
       candidates.push(file);
     }
+  }
+  if (envRoot) {
+    candidates.push(
+      `${envRoot}/hdri/anniversary_lounge_4k.exr`,
+      `${envRoot}/hdri/wooden_lounge_4k.exr`
+    );
   }
   const unique = [...new Set(candidates.map((item) => normalizeAssetUrlPath(item)).filter(Boolean))];
   for (const url of unique) {
@@ -4424,10 +4540,17 @@ const ENV_DECOR_LAYOUTS = {
 async function fetchSharedPropCatalog() {
   if (decorDebugState.sharedCatalog) return decorDebugState.sharedCatalog;
   try {
-    const res = await fetch('/api/shared-props', { cache: 'no-cache' });
-    if (!res.ok) return [];
+    const res = await fetch('/assets/environments/_shared/props/props.json', { cache: 'no-cache' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const payload = await res.json();
-    const items = Array.isArray(payload?.props) ? payload.props : [];
+    const items = Object.entries(payload || {})
+      .filter(([folder, modelFile]) => folder && modelFile)
+      .map(([folder, modelFile]) => ({
+        folder: String(folder),
+        modelFile: String(modelFile),
+        modelUrl: normalizeAssetUrlPath(`/assets/environments/_shared/props/${folder}/${modelFile}`)
+      }))
+      .sort((a, b) => a.folder.localeCompare(b.folder));
     if (!sharedPropCatalogLogged) {
       sharedPropCatalogLogged = true;
       if (items.length) {
@@ -4441,10 +4564,10 @@ async function fetchSharedPropCatalog() {
     }
     decorDebugState.sharedCatalog = items;
     return items;
-  } catch {
+  } catch (error) {
     if (!sharedPropCatalogLogged) {
       sharedPropCatalogLogged = true;
-      console.error('[decor] Failed to fetch shared props catalog from /api/shared-props');
+      console.error('[decor] Failed to fetch shared props catalog from /assets/environments/_shared/props/props.json', error);
     }
     return [];
   }
@@ -4506,6 +4629,8 @@ async function addEnvironmentDecor(roomRoot, environmentId) {
   const catalog = await fetchSharedPropCatalog();
   const byFolder = new Map((catalog || []).map((entry) => [String(entry.folder), entry]));
   decorDebugState.props = [];
+  decorDebugState.failures = [];
+  decorDebugState.requested = layout.length;
   const missingExpected = SHARED_PROP_FOLDERS.filter((folder) => !byFolder.has(folder));
   if (missingExpected.length) {
     console.warn(`[decor] missing expected prop folders: ${missingExpected.join(', ')}`);
@@ -4517,40 +4642,44 @@ async function addEnvironmentDecor(roomRoot, environmentId) {
 
   for (const spec of layout) {
     const entry = byFolder.get(spec.folder);
-    let model = await loadDecorModelFromCatalogEntry(entry);
-    let modelUrl = entry?.modelUrl || '';
-    if (!model) {
-      model = buildDecorProxy(spec.folder, 0xbca480);
-      modelUrl = '';
+    if (!entry?.modelUrl) {
+      const message = `${spec.folder}: NO_MODEL_FOUND in props.json`;
+      decorDebugState.failures.push(message);
+      console.warn('[decor] missing model entry', spec.folder);
+      continue;
     }
+    let model = await loadDecorModelFromCatalogEntry(entry);
+    if (!model) {
+      const message = `${spec.folder}: failed to load ${entry.modelUrl}`;
+      decorDebugState.failures.push(message);
+      continue;
+    }
+    const modelUrl = entry.modelUrl;
     const desiredX = Number(spec.pos?.[0] || 0);
     const desiredY = FLOOR_Y + Number(spec.pos?.[1] || 0);
     // Spec coordinates are authored with +Z as "back wall"; this scene uses -Z for back wall.
     const desiredZ = -Number(spec.pos?.[2] || 0);
     model.position.set(desiredX, desiredY, desiredZ);
     model.rotation.y = Number(spec.rotY || 0);
-    model.scale.setScalar(Number(spec.scale || 0.35));
+    model.scale.setScalar(1);
     model.updateWorldMatrix(true, true);
     tmpBox.setFromObject(model);
     if (Number.isFinite(tmpBox.min.y) && Number.isFinite(tmpBox.max.y)) {
-      const maxDim = Math.max(
-        0.0001,
-        tmpBox.max.x - tmpBox.min.x,
-        tmpBox.max.y - tmpBox.min.y,
-        tmpBox.max.z - tmpBox.min.z
-      );
-      if (maxDim > 3.5) {
-        const downScale = 3.2 / maxDim;
-        model.scale.multiplyScalar(downScale);
-      } else if (maxDim < 0.15) {
-        const upScale = 0.35 / maxDim;
-        model.scale.multiplyScalar(upScale);
-      }
+      const rawHeight = Math.max(0.0001, tmpBox.max.y - tmpBox.min.y);
+      const folder = String(spec.folder || '').toLowerCase();
+      let targetHeight = 1.1;
+      if (folder.includes('lamp') || folder.includes('lightbulb')) targetHeight = 1.4;
+      if (folder.includes('table')) targetHeight = 0.8;
+      if (folder.includes('shelf') || folder.includes('bookshelf')) targetHeight = 2.0;
+      if (folder.includes('frame') || folder.includes('picture')) targetHeight = 0.7;
+      const fittedScale = clampValue(targetHeight / rawHeight, 0.08, 2.8, 0.4);
+      const authoredScale = Number(spec.scale || 1);
+      model.scale.multiplyScalar(fittedScale * authoredScale);
       model.updateWorldMatrix(true, true);
       tmpBox.setFromObject(model);
-      // Ground floor-level props while leaving elevated props (lamps/frames/tabletop) at authored height.
+      // Ground floor-level props while leaving elevated props at authored height.
       if (Math.abs(Number(spec.pos?.[1] || 0)) < 0.01 && Number.isFinite(tmpBox.min.y)) {
-        model.position.y += FLOOR_Y - tmpBox.min.y;
+        model.position.y += (FLOOR_Y + 0.01) - tmpBox.min.y;
       }
     }
     decorRoot.add(model);
@@ -4561,11 +4690,11 @@ async function addEnvironmentDecor(roomRoot, environmentId) {
     });
   }
 
-  updateDecorStatusText(`Decor: ${decorDebugState.props.length} placed (${environmentId})`);
+  updateDecorStatusText(`Decor: ${decorDebugState.props.length}/${decorDebugState.requested} loaded (${environmentId})`);
   if (decorDebugList) {
-    decorDebugList.textContent = decorDebugState.props.length
-      ? decorDebugState.props.map((entry) => `${entry.name} (${entry.modelUrl || 'proxy'})`).join('\n')
-      : 'No decor entries placed.';
+    const loadedLines = decorDebugState.props.map((entry) => `${entry.name} (${entry.modelUrl || 'NO_MODEL_URL'})`);
+    const failedLines = decorDebugState.failures.map((line) => `FAIL ${line}`);
+    decorDebugList.textContent = [...loadedLines, ...failedLines].join('\n') || 'No decor entries placed.';
   }
   refreshDecorBoundsHelpers();
 }
@@ -4728,7 +4857,7 @@ async function buildRoomEnvironment(entry, token, environmentId) {
     `walls=${wallBaseOk ? 'OK' : 'MISSING'}`,
     `trim=${trimBaseOk ? 'OK' : 'MISSING'}`,
     `hdri=${hdriTex ? 'OK' : 'optional-missing'}`,
-    `decor=${decorDebugState.props.length}`
+    `decorLoaded=${decorDebugState.props.length}/${decorDebugState.requested || 0}`
   ];
   if (envStatus.missingMaps.length) {
     statusDetailParts.push(`missingMaps=${envStatus.missingMaps.join(',')}`);
@@ -4744,12 +4873,12 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   }
 }
 
-function applyEnvironment(environmentId) {
+function applyEnvironment(environmentId, { force = false } = {}) {
   const fallbackEnvId = environmentById.has('casino_lounge')
     ? 'casino_lounge'
     : (environmentCatalog[0]?.id || 'casino_lounge');
   const safeId = environmentById.has(environmentId) ? environmentId : fallbackEnvId;
-  if (currentEnvironmentId === safeId && environmentLoadState === 'ok') return;
+  if (!force && currentEnvironmentId === safeId && environmentLoadState === 'ok') return;
   currentEnvironmentId = safeId;
   environmentApplyToken += 1;
   const token = environmentApplyToken;
@@ -5099,6 +5228,9 @@ function updateHud() {
     hudTrumpValue.textContent = '-';
     turnTimerHud.textContent = 'TIME: --';
     closeBidTray();
+    closeModeTray();
+    closeTrumpTray();
+    chooserWaitBanner?.classList.add('hidden');
     closeChipTray();
     updateScoreboard();
     updateMarksMenu();
@@ -5163,6 +5295,7 @@ function updateEnvironmentControls() {
   if (!environmentCatalog.length) {
     environmentSelect.innerHTML = '<option value="casino_lounge">casino_lounge</option>';
     environmentSelect.disabled = true;
+    if (hdriVariantSelect) hdriVariantSelect.disabled = true;
     environmentPreview.removeAttribute('src');
     environmentStateText.textContent = 'Loading backgrounds...';
     setEnvironmentLoadStatus('loading');
@@ -5188,6 +5321,13 @@ function updateEnvironmentControls() {
 
   const isHost = roomState?.hostClientId === localClientId;
   environmentSelect.disabled = !isConnected() || !roomState || !isHost;
+  const variants = ENV_HDRI_CHOICES[safeId] || null;
+  const currentVariant = getHdriVariantForEnvironment(safeId);
+  if (hdriVariantSelect) {
+    hdriVariantSelect.disabled = !variants;
+    hdriVariantSelect.value = currentVariant;
+    hdriVariantSelect.title = variants ? 'Switch environment lighting variant' : 'No HDRI variants for this environment';
+  }
   if (!roomState) {
     environmentStateText.textContent = `Current: ${entry?.name || safeId}`;
   } else if (isHost) {
@@ -5570,7 +5710,7 @@ function updateBidControls() {
   if (!roomState || roomState.phase !== PHASES.BIDDING) {
     passBtn.disabled = true;
     updateNameplates();
-    updateActionModal();
+    updateModeTrumpTrays();
     return;
   }
 
@@ -5610,7 +5750,7 @@ function updateBidControls() {
     forceClosePanel = true;
     updatePanelAutoBehavior();
   };
-  updateActionModal();
+  updateModeTrumpTrays();
   updateBidTray();
 }
 
@@ -5645,7 +5785,7 @@ function updateTrumpControls() {
     });
     trumpButtonsWrap.appendChild(btn);
   }
-  updateActionModal();
+  updateModeTrumpTrays();
 }
 
 function applyStoredAvatarIfNeeded() {
@@ -5760,6 +5900,7 @@ function applySnapshot(room) {
   renderSeatControls();
   updateBidControls();
   updateTrumpControls();
+  updateModeTrumpTrays();
   renderHandsAndTrick();
   const avatarsChanged = !prevRoomState || !Array.isArray(prevRoomState.seats) || !Array.isArray(roomState.seats)
     || roomState.seats.some((seat, index) => {
@@ -6060,21 +6201,7 @@ function connect() {
 }
 
 async function loadHdrTexture(url) {
-  try {
-    const head = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-    if (!head.ok) {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-
-  try {
-    return await new RGBELoader().loadAsync(url);
-  } catch (error) {
-    console.warn('[env] HDR load failed, falling back', url, error);
-    return null;
-  }
+  return loadEnvironmentHdri(url);
 }
 
 async function initHdrEnvironment() {
@@ -6085,22 +6212,19 @@ async function initHdrEnvironment() {
   };
 
   const hdrCandidates = [
-    '/assets/environments/casino_lounge/hdri/anniversary_lounge_4k.hdr',
-    '/assets/environments/casino_lounge/hdri/wooden_lounge_4k.hdr',
-    '/assets/hdr/warm_interior_01.hdr'
+    '/assets/environments/_shared/hdri/anniversary_lounge_4k.exr',
+    '/assets/environments/_shared/hdri/wooden_lounge_4k.exr'
   ];
 
   for (const candidate of hdrCandidates) {
     const texture = await loadHdrTexture(candidate);
     if (!texture) continue;
-    const envMap = pmremGenerator.fromEquirectangular(texture).texture;
-    scene.environment = envMap;
+    scene.environment = texture;
     scene.background = null;
-    texture.dispose();
     return;
   }
 
-  console.warn('[env] No HDR found; using RoomEnvironment fallback.');
+  console.warn('[env] No EXR found; using RoomEnvironment fallback.');
   fallbackEnv();
 }
 
@@ -6250,6 +6374,14 @@ function ensureButtons() {
     sendAction('host:setEnvironment', { environmentId });
   });
 
+  hdriVariantSelect?.addEventListener('change', () => {
+    const envId = roomState?.environmentId || currentEnvironmentId || environmentSelect.value || 'casino_lounge';
+    if (!ENV_HDRI_CHOICES[envId]) return;
+    const variant = sanitizeHdriVariant(hdriVariantSelect.value);
+    setHdriVariantForEnvironment(envId, variant, { persist: true });
+    applyEnvironment(envId, { force: true });
+  });
+
   burnPanelOpacityInput?.addEventListener('input', () => {
     applyBurnPanelOpacity(burnPanelOpacityInput.value, { persist: true });
   });
@@ -6308,14 +6440,13 @@ function ensureButtons() {
 
   listLoadedPropsBtn?.addEventListener('click', () => {
     if (!decorDebugList) return;
-    if (!decorDebugState.props.length) {
+    if (!decorDebugState.props.length && !decorDebugState.failures.length) {
       decorDebugList.textContent = 'No props loaded.';
       return;
     }
-    decorDebugList.textContent = decorDebugState.props.map((entry) => {
-      const source = entry.modelUrl ? entry.modelUrl : 'proxy';
-      return `${entry.name} (${source})`;
-    }).join('\n');
+    const loaded = decorDebugState.props.map((entry) => `${entry.name} (${entry.modelUrl || 'NO_MODEL_URL'})`);
+    const failed = decorDebugState.failures.map((line) => `FAIL ${line}`);
+    decorDebugList.textContent = [...loaded, ...failed].join('\n');
   });
 
   panelToggle.addEventListener('click', () => {

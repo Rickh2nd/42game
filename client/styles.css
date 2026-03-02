@@ -798,7 +798,10 @@ body,
 }
 
 #bidTrayStatus,
-#chipTrayBody {
+#chipTrayBody,
+#modeTrayStatus,
+#trumpTrayStatus,
+#chipYourBetText {
   margin-top: 3px;
   color: #d2deef;
 }
@@ -844,8 +847,36 @@ body,
   text-align: center;
 }
 
+.dollarTrayRow .buttonRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.dollarTrayRow button.active {
+  border-color: rgba(250, 215, 128, 0.95);
+  box-shadow: inset 0 0 0 1px rgba(250, 215, 128, 0.35);
+}
+
 #chipTrayButtons {
   margin-top: 6px;
+}
+
+.smallWaitBanner {
+  position: fixed;
+  left: 50%;
+  bottom: 236px;
+  transform: translateX(-50%);
+  z-index: 7;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 220, 154, 0.4);
+  background: rgba(8, 14, 21, 0.88);
+  color: #e7d8ba;
+  padding: 7px 14px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
 }
 
 #actionModalTitle {

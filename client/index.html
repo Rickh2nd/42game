@@ -182,6 +182,11 @@
           <div class="controlRow">
             <label for="environmentSelect">Background</label>
             <select id="environmentSelect"></select>
+            <label for="hdriVariantSelect">Lighting</label>
+            <select id="hdriVariantSelect">
+              <option value="primary">Primary</option>
+              <option value="alt">Alt</option>
+            </select>
             <img id="environmentPreview" alt="Background preview" />
             <div id="environmentStateText" class="smallText"></div>
             <div id="environmentLoadText" class="smallText"></div>
@@ -528,20 +533,40 @@
       </div>
     </div>
 
+    <div id="modeTray" class="bottomTray hidden" role="dialog" aria-modal="false" aria-label="Mode tray">
+      <div class="bottomTrayHeader">
+        <h2 id="modeTrayTitle">Choose Mode</h2>
+      </div>
+      <div id="modeTrayStatus" class="smallText">Select hand mode.</div>
+      <div id="modeTrayButtons" class="buttonRow"></div>
+    </div>
+
+    <div id="trumpTray" class="bottomTray hidden" role="dialog" aria-modal="false" aria-label="Trump tray">
+      <div class="bottomTrayHeader">
+        <h2 id="trumpTrayTitle">Choose Trump Number</h2>
+      </div>
+      <div id="trumpTrayStatus" class="smallText">Pick trump suit number.</div>
+      <div id="trumpTrayButtons" class="gridButtons compactBidGrid"></div>
+    </div>
+
+    <div id="chooserWaitBanner" class="smallWaitBanner hidden">Waiting for bidder…</div>
+
     <div id="chipTray" class="bottomTray hidden" role="dialog" aria-modal="false" aria-label="Chip betting tray">
       <div class="bottomTrayHeader">
-        <h2 id="chipTrayTitle">Chip Betting</h2>
-        <div id="chipTrayPotText" class="smallText">Pot 0</div>
+        <h2 id="chipTrayTitle">Dollar Betting</h2>
+        <div id="chipTrayPotText" class="smallText">Pot: $0</div>
       </div>
       <div id="chipTrayBody" class="smallText">Waiting for betting choices...</div>
-      <div class="chipInputRow">
-        <label for="chipBidAmountInput">Bid Amount</label>
-        <div class="chipStepper">
-          <button id="chipMinusBtn" type="button">-</button>
-          <input id="chipBidAmountInput" type="number" min="1" step="1" value="10" />
-          <button id="chipPlusBtn" type="button">+</button>
+      <div class="chipInputRow dollarTrayRow">
+        <label>Bet Increments</label>
+        <div id="chipIncrementButtons" class="buttonRow">
+          <button id="chipInc1Btn" type="button">$1</button>
+          <button id="chipInc5Btn" type="button">$5</button>
+          <button id="chipInc10Btn" type="button">$10</button>
+          <button id="chipInc20Btn" type="button">$20</button>
         </div>
       </div>
+      <div id="chipYourBetText" class="smallText">Your Bet: $0</div>
       <div id="chipTrayButtons" class="buttonRow"></div>
     </div>
 

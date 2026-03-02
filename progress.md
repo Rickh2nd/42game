@@ -558,3 +558,55 @@ Validation:
   - texture URLs for spooky/rustic/modern/neon floor/walls/trim return 200
   - casino uses `materials/carpet` for floor (expected `materials/floor` 404)
 - `/api/shared-props` reports 18 folders but 0 model files currently present; client decor pipeline falls back to visible proxy props and logs details.
+
+Update (EXR + props manifest + bottom trays + dollar betting pass):
+- Copied shared lighting and decor assets into repo:
+  - `client/assets/environments/_shared/hdri/*.exr` (10 required EXRs)
+  - `client/assets/environments/_shared/props/<18 folders>/...`
+- Installed Blender locally and batch-exported GLBs from source `.blend` files into each shared prop folder.
+- Generated `client/assets/environments/_shared/props/props.json` mapping each prop folder to its GLB.
+- Confirmed static asset serving for `/assets` endpoints (health + EXR + GLB + props.json all return HTTP 200).
+
+Client (`/client/main.js`) changes:
+- Added EXR-first HDRI flow:
+  - `loadEnvironmentHdri()` now supports `.exr` via `EXRLoader` and PMREM.
+  - Environment HDRI selection now uses `_shared/hdri` EXR assignments (primary/alt per environment).
+  - Added per-environment HDRI variant persistence (`primary|alt`) and wired `#hdriVariantSelect`.
+  - Removed hardcoded `.hdr` boot candidates; init fallback now uses shared EXRs then RoomEnvironment fallback.
+- Replaced decor catalog loading from `/api/shared-props` with static manifest:
+  - fetch `/assets/environments/_shared/props/props.json`
+  - resolve each model URL as `/assets/environments/_shared/props/<folder>/<file>.glb`
+- Decor loading/diagnostics hardening:
+  - no more silent cube proxy fallback when model is missing/fails
+  - explicit failure entries in decor debug list
+  - status now reports `decorLoaded=<loaded>/<requested>`
+  - improved auto-fit scaling by prop class (lamp/table/shelf/frame targets)
+- Bottom trays:
+  - mode/trump selection now rendered in `#modeTray` and `#trumpTray`
+  - non-active players see `#chooserWaitBanner`
+  - action modal is forcibly closed for these phases
+- Dollar betting tray:
+  - removed dead numeric-input references
+  - fixed increment buttons `$1/$5/$10/$20`
+  - live `Your Bet: $X` draft amount
+  - actions: Bet, Raise (+$5), Call, Fold
+  - totals and pot now display with `$` formatting
+
+Markup/CSS:
+- `client/index.html` already contains new tray nodes and dollar increment controls.
+- `client/styles.css` includes tray/wait-banner styles used by the updated logic.
+
+Validation:
+- `node --check client/main.js` pass
+- `node --check server/server.js` pass
+- Local static route smoke:
+  - `/health` -> 200
+  - `/assets/environments/_shared/hdri/anniversary_lounge_4k.exr` -> 200
+  - `/assets/environments/_shared/props/side_table_01_4k/side_table_01_4k.glb` -> 200
+  - `/assets/environments/_shared/props/props.json` -> 200
+- Attempted skill Playwright loop failed due missing dependency in environment:
+  - `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'playwright'`
+
+TODO (next pass if needed):
+- Run full browser visual verification for each environment to confirm decor placement aesthetics.
+- Optionally remove legacy `/api/shared-props` route now that client uses static `props.json`.
