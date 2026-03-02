@@ -11,9 +11,13 @@
   --success: #56c47e;
   --chip: rgba(255, 255, 255, 0.08);
   --burnPanelBgAlpha: 0.55;
-  --tableHudOffsetX: 0px;
-  --tableHudOffsetY: 0px;
   --tableHudScale: 1;
+  --hudBidOffsetX: 0px;
+  --hudBidOffsetY: 0px;
+  --hudTrumpOffsetX: 0px;
+  --hudTrumpOffsetY: 0px;
+  --bettingModalOffsetX: 0px;
+  --bettingModalOffsetY: 0px;
 }
 
 * {
@@ -91,11 +95,7 @@ body,
   left: 50%;
   top: 52%;
   width: min(680px, 70vw);
-  transform: translate(
-      calc(-50% + var(--tableHudOffsetX)),
-      calc(-50% + var(--tableHudOffsetY))
-    )
-    scale(var(--tableHudScale));
+  transform: translate(-50%, -50%) scale(var(--tableHudScale));
   transform-origin: center center;
   display: flex;
   justify-content: space-between;
@@ -104,7 +104,23 @@ body,
   z-index: 2;
 }
 
-#tableHudDragHandle {
+.hudBlockWrap {
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+#hudBidBlock {
+  transform: translate(var(--hudBidOffsetX), var(--hudBidOffsetY));
+}
+
+#hudTrumpBlock {
+  transform: translate(var(--hudTrumpOffsetX), var(--hudTrumpOffsetY));
+}
+
+.hudDragHandle {
   pointer-events: auto;
   cursor: grab;
   border-radius: 999px;
@@ -114,10 +130,10 @@ body,
   font-size: 10px;
   letter-spacing: 0.14em;
   padding: 4px 9px;
-  margin-top: -26px;
+  margin-top: -2px;
 }
 
-#tableHudDragHandle.dragging {
+.hudDragHandle.dragging {
   cursor: grabbing;
 }
 
@@ -698,6 +714,10 @@ body,
 
 .bettingModalPanel {
   width: min(420px, calc(100vw - 28px));
+  transform: translate(
+    calc(-50% + var(--bettingModalOffsetX)),
+    calc(-50% + var(--bettingModalOffsetY))
+  );
 }
 
 #bettingModalButtons {
@@ -707,6 +727,22 @@ body,
 #bettingModalPot {
   margin-top: 6px;
   color: #f0d59f;
+}
+
+.modalDragHandle {
+  pointer-events: auto;
+  cursor: grab;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(8, 14, 21, 0.72);
+  color: #c7d7e9;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  padding: 4px 9px;
+}
+
+.modalDragHandle.dragging {
+  cursor: grabbing;
 }
 
 .modalHeader {

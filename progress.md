@@ -312,3 +312,76 @@ Validation (this pass):
 
 Remaining follow-up suggestion:
 - Do one manual visual pass in browser for final HUD drag ergonomics and betting modal sizing on mobile.
+
+Update (critical bugfix pass: betting modal + environments + slider ranges + sound + independent HUD drag):
+- Betting lifecycle hardened (server + client):
+  - Server state now includes `bettingEnabledNextHand`, `bettingHandId`, and snapshot `betting` object:
+    `{ enabled, activeThisHand, handId, isOpen, betAmount, betPot, betState }`.
+  - `host:bettingEnable` now supports ON-mid-hand semantics:
+    - enabling mid-hand applies next hand via `bettingEnabledNextHand`
+    - pre-hand phases can apply immediately.
+  - Added explicit betting open/close broadcasts at hand betting phase boundaries:
+    - packet events: `type: "betting:open"` / `type: "betting:close"`
+    - direct socket events: `betting:open` / `betting:close`.
+  - Added ack-based socket handler `betting:respond` on server.
+  - Client betting modal now uses ack flow for CALL/FOLD (`emitWithAckTimeout("betting:respond", ...)`) and opens from either snapshot `betting.isOpen` or open events.
+
+- Betting modal UX:
+  - Added draggable handle `#bettingModalDragHandle`.
+  - Added persistent modal offsets in localStorage key `texas42_betting_modal_v1`.
+  - Modal auto-closes on close event/state and no longer depends on side panel state.
+
+- BID/TRUMP HUD drag split:
+  - Replaced single combined HUD drag with independent drags:
+    - `#hudBidDragHandle` controls BID block offset
+    - `#hudTrumpDragHandle` controls TRUMP block offset.
+  - Persisted with existing HUD storage key (`texas42_table_hud_v1`) using:
+    `bidOffsetX/Y`, `trumpOffsetX/Y`, `scale`.
+  - Backward-compatible read of legacy `offsetX/offsetY` -> BID offsets.
+
+- Slider range expansion (~300% pass):
+  - Updated HTML slider ranges and JS clamps for all view/scene sliders, plus:
+    - `burn_panel_opacity` now `0.01..1.00`
+    - `table_hud_scale` now `0.15..10.50`
+    - `bet_amount` now `1..300`
+    - `table_domino_scale` now `0.01..75`
+    - `table_domino_tilt_deg` now `0..105`
+    - view and scene tuning ranges expanded similarly.
+
+- Sound system fix:
+  - Added actual files:
+    - `/client/assets/sounds/thud.wav`
+    - `/client/assets/sounds/party.wav`
+  - Client AudioManager now file-backed with autoplay-safe unlock:
+    - `unlockAudio()` runs on first pointer gesture
+    - one-time diagnostics:
+      - `[audio] not unlocked yet`
+      - `[audio] file missing` / playback failure.
+  - Existing triggers preserved:
+    - domino played -> thud
+    - new 7-mark winner -> party.
+
+- Environment robustness:
+  - Existing 5-room manifest retained (`casino_lounge`, `spooky_parlor`, `rustic_tavern`, `modern_suite`, `neon_arcade`).
+  - Loader keeps room-shell fallback behavior and status line (`Environment loaded: OK` / `Environment fallback: ...`) with missing-asset tolerance.
+
+Validation in this pass:
+- Syntax checks:
+  - `node --check server/server.js` pass
+  - `node --check client/main.js` pass
+  - `node --check shared/fortyTwo.js` pass
+  - `node --check client/src/net/socket.js` pass
+- Local transport/assets smoke:
+  - `/health` OK
+  - `/socket.io` handshake OK
+  - `/assets/sounds/thud.wav` and `/assets/sounds/party.wav` return 200
+- Betting flow smoke:
+  - reached betting phase after bid/mode/trump progression
+  - observed `betting:open` event
+  - `betting:respond` ack path returns `{ ok: true, seatIndex, decision }`.
+
+Outstanding visual/manual TODO:
+- Manual browser verification for drag ergonomics (BID/TRUMP blocks and betting modal placement) on both desktop and mobile widths.
+- Playwright step attempted per develop-web-game skill:
+  - `node "$WEB_GAME_CLIENT" ...`
+  - blocked with `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright'` in this environment.

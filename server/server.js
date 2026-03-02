@@ -270,10 +270,12 @@ function createRoom(roomId, hostClientId) {
     lastBurnContributor: { teamA: 0, teamB: 1 },
     lastSevenMarksWinnerTeam: null,
     bettingEnabled: false,
+    bettingEnabledNextHand: false,
     baseBetAmount: 10,
     sessionBankroll: { 0: BETTING_DEFAULT_BANKROLL, 1: BETTING_DEFAULT_BANKROLL, 2: BETTING_DEFAULT_BANKROLL, 3: BETTING_DEFAULT_BANKROLL },
     pendingBets: null,
     bettingTimer: null,
+    bettingHandId: 0,
     hands: { 0: [], 1: [], 2: [], 3: [] },
     handNumber: 0,
     sevensState: null,
@@ -353,6 +355,10 @@ function roomPublicSnapshot(room, viewerClientId) {
     2: room.hands[2]?.length || 0,
     3: room.hands[3]?.length || 0
   };
+  const bettingOpen = room.phase === PHASES.BETTING && !!room.pendingBets;
+  const bettingResponses = room.pendingBets?.responses
+    ? { ...room.pendingBets.responses }
+    : {};
 
   const viewerSeats = controlledSeatForClient(room, viewerClientId);
   const hands = {};
@@ -395,15 +401,27 @@ function roomPublicSnapshot(room, viewerClientId) {
     champsTeam: room.champsTeam,
     lastSevenMarksWinnerTeam: room.lastSevenMarksWinnerTeam || null,
     bettingEnabled: !!room.bettingEnabled,
+    bettingEnabledNextHand: !!room.bettingEnabledNextHand,
     baseBetAmount: Number(room.baseBetAmount || 10),
     sessionBankroll: { ...room.sessionBankroll },
     pendingBets: room.pendingBets ? {
       amount: Number(room.pendingBets.amount || 0),
       pot: Number(room.pendingBets.pot || 0),
+      handId: Number(room.pendingBets.handId || room.bettingHandId || room.handNumber || 0),
+      isOpen: !!room.pendingBets.isOpen,
       openedAtTs: Number(room.pendingBets.openedAtTs || 0),
       closesAtTs: Number(room.pendingBets.closesAtTs || 0),
       responses: { ...room.pendingBets.responses }
     } : null,
+    betting: {
+      enabled: !!room.bettingEnabledNextHand,
+      activeThisHand: !!room.bettingEnabled,
+      handId: Number(room.pendingBets?.handId || room.bettingHandId || room.handNumber || 0),
+      isOpen: bettingOpen,
+      betAmount: Number(room.pendingBets?.amount || room.baseBetAmount || 10),
+      betPot: Number(room.pendingBets?.pot || 0),
+      betState: bettingResponses
+    },
     burnPiles: {
       teamA: room.burnPiles.teamA.map((tile) => ({ ...tile })),
       teamB: room.burnPiles.teamB.map((tile) => ({ ...tile }))
@@ -462,6 +480,14 @@ function broadcastRoomEvent(room, payload) {
     const client = clients.get(clientId);
     if (!client) continue;
     send(client.socket, payload);
+  }
+}
+
+function broadcastRoomSocketEvent(room, eventName, payload) {
+  for (const clientId of room.clientIds) {
+    const client = clients.get(clientId);
+    if (!client?.socket) continue;
+    client.socket.emit(eventName, payload);
   }
 }
 
@@ -830,10 +856,21 @@ function closeBettingRound(room) {
     clearTimeout(room.bettingTimer);
     room.bettingTimer = null;
   }
+  const closePayload = {
+    handId: Number(pending.handId || room.bettingHandId || room.handNumber || 0),
+    betPot: Number(pending.pot || 0),
+    betState: { ...responses }
+  };
   room.pendingBets = {
     ...pending,
+    isOpen: false,
     responses
   };
+  broadcastRoomEvent(room, {
+    type: 'betting:close',
+    ...closePayload
+  });
+  broadcastRoomSocketEvent(room, 'betting:close', closePayload);
   beginPlayingTricks(room);
 }
 
@@ -847,10 +884,13 @@ function startBettingRound(room) {
   room.pendingBets = {
     amount,
     pot: 0,
+    handId: Number(room.handNumber || 0),
+    isOpen: true,
     openedAtTs: Date.now(),
     closesAtTs: Date.now() + BETTING_RESPONSE_WINDOW_MS,
     responses
   };
+  room.bettingHandId = Number(room.handNumber || 0);
   room.phase = PHASES.BETTING;
   room.turnSeat = null;
   room.turnDeadlineTs = null;
@@ -866,6 +906,21 @@ function startBettingRound(room) {
     broadcastTurnTimer(room);
     scheduleCpuIfNeeded(room);
   }, BETTING_RESPONSE_WINDOW_MS);
+  const openPayload = {
+    handId: Number(room.pendingBets.handId || room.handNumber || 0),
+    defaultBet: amount,
+    players: (room.activeSeats || []).map((seatIndex) => ({
+      seatIndex,
+      name: seatByIndex(room, seatIndex)?.name || `Seat ${seatIndex + 1}`
+    })),
+    betPot: 0,
+    betState: { ...responses }
+  };
+  broadcastRoomEvent(room, {
+    type: 'betting:open',
+    ...openPayload
+  });
+  broadcastRoomSocketEvent(room, 'betting:open', openPayload);
 }
 
 function resolveBettingResponse(room, seatIndex, decision) {
@@ -905,6 +960,8 @@ function startNewHand(room, { resetMarks = false } = {}) {
 
   prepareSeatsForGame(room);
   ensureSessionBankroll(room);
+  room.bettingEnabled = !!room.bettingEnabledNextHand;
+  room.pendingBets = null;
 
   const deck = buildShuffledDeck();
   room.hands = dealHands(deck, [0, 1, 2, 3], 7);
@@ -1586,15 +1643,32 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
     if (payload.baseBetAmount != null) {
       room.baseBetAmount = Math.max(1, Math.min(500, Number(payload.baseBetAmount) || 10));
     }
-    room.bettingEnabled = enabled;
+    room.bettingEnabledNextHand = enabled;
+
+    const applyImmediate = [PHASES.LOBBY, PHASES.BIDDING, PHASES.CHOOSE_MODE, PHASES.CHOOSE_TRUMP].includes(room.phase);
+    if (enabled && applyImmediate) {
+      room.bettingEnabled = true;
+    }
 
     if (!enabled) {
+      room.bettingEnabled = false;
       room.pendingBets = null;
       if (room.bettingTimer) {
         clearTimeout(room.bettingTimer);
         room.bettingTimer = null;
       }
       if (room.phase === PHASES.BETTING) {
+        broadcastRoomEvent(room, {
+          type: 'betting:close',
+          handId: Number(room.bettingHandId || room.handNumber || 0),
+          betPot: 0,
+          betState: {}
+        });
+        broadcastRoomSocketEvent(room, 'betting:close', {
+          handId: Number(room.bettingHandId || room.handNumber || 0),
+          betPot: 0,
+          betState: {}
+        });
         beginPlayingTricks(room);
       }
     }
@@ -2055,6 +2129,47 @@ io.on('connection', (socket) => {
   socket.on('debug:ping', (payload, ack) => {
     if (typeof ack === 'function') {
       ack({ ok: true, serverTime: Date.now(), payload: payload ?? null });
+    }
+  });
+
+  socket.on('betting:respond', (payload, ack) => {
+    const resolvedClientId = socketToClientId.get(socket.id);
+    if (!resolvedClientId) {
+      if (typeof ack === 'function') ack({ ok: false, message: 'Client not mapped.' });
+      return;
+    }
+    const client = clients.get(resolvedClientId);
+    const room = client?.roomId ? rooms.get(client.roomId) : null;
+    if (!room) {
+      if (typeof ack === 'function') ack({ ok: false, message: 'Not in a room.' });
+      return;
+    }
+    if (room.phase !== PHASES.BETTING || !room.pendingBets) {
+      if (typeof ack === 'function') ack({ ok: false, message: 'Betting is not open.' });
+      return;
+    }
+
+    const seatIndex = humanSeatForClient(room, resolvedClientId)?.seatIndex;
+    if (!Number.isInteger(seatIndex)) {
+      if (typeof ack === 'function') ack({ ok: false, message: 'No controllable seat for betting response.' });
+      return;
+    }
+    if (!Array.isArray(room.activeSeats) || !room.activeSeats.includes(seatIndex)) {
+      if (typeof ack === 'function') ack({ ok: false, message: 'Seat is not active this hand.' });
+      return;
+    }
+    const decision = payload?.decision === 'called' ? 'called' : 'folded';
+    const ok = resolveBettingResponse(room, seatIndex, decision);
+    if (!ok) {
+      if (typeof ack === 'function') ack({ ok: false, message: 'Betting response rejected.' });
+      return;
+    }
+
+    broadcastRoom(room);
+    broadcastTurnTimer(room);
+    scheduleCpuIfNeeded(room);
+    if (typeof ack === 'function') {
+      ack({ ok: true, seatIndex, decision });
     }
   });
 

@@ -29,14 +29,19 @@
           </div>
         </div>
         <div id="tableHud">
-          <button id="tableHudDragHandle" title="Drag table HUD">MOVE HUD</button>
-          <div class="hudBlock hudLeft">
-            <div class="hudLabel">BID</div>
-            <div class="hudValue" id="hudBidValue">-</div>
+          <div id="hudBidBlock" class="hudBlockWrap">
+            <button id="hudBidDragHandle" class="hudDragHandle" title="Drag BID display">MOVE BID</button>
+            <div class="hudBlock hudLeft">
+              <div class="hudLabel">BID</div>
+              <div class="hudValue" id="hudBidValue">-</div>
+            </div>
           </div>
-          <div class="hudBlock hudRight">
-            <div class="hudLabel">TRUMP</div>
-            <div class="hudValue" id="hudTrumpValue">-</div>
+          <div id="hudTrumpBlock" class="hudBlockWrap">
+            <button id="hudTrumpDragHandle" class="hudDragHandle" title="Drag TRUMP display">MOVE TRUMP</button>
+            <div class="hudBlock hudRight">
+              <div class="hudLabel">TRUMP</div>
+              <div class="hudValue" id="hudTrumpValue">-</div>
+            </div>
           </div>
         </div>
 
@@ -174,12 +179,12 @@
           </div>
           <div class="viewControl">
             <label for="burn_panel_opacity">Burn Panel Opacity</label>
-            <input id="burn_panel_opacity" type="range" min="0.05" max="0.95" step="0.01" />
+            <input id="burn_panel_opacity" type="range" min="0.01" max="1.00" step="0.01" />
             <span id="burn_panel_opacity_val" class="viewVal">0.55</span>
           </div>
           <div class="viewControl">
             <label for="table_hud_scale">Table HUD Scale</label>
-            <input id="table_hud_scale" type="range" min="0.50" max="3.50" step="0.05" />
+            <input id="table_hud_scale" type="range" min="0.15" max="10.50" step="0.05" />
             <span id="table_hud_scale_val" class="viewVal">1.00</span>
           </div>
           <div class="controlRow">
@@ -194,57 +199,57 @@
           <h2>VIEW</h2>
           <div class="viewControl">
             <label for="view_distance">Distance</label>
-            <input id="view_distance" type="range" min="0.10" max="8.00" step="0.01" />
+            <input id="view_distance" type="range" min="0.10" max="24.00" step="0.01" />
             <span id="view_distance_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_height">Height</label>
-            <input id="view_height" type="range" min="0.10" max="6.00" step="0.01" />
+            <input id="view_height" type="range" min="0.10" max="18.00" step="0.01" />
             <span id="view_height_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_forward">Forward Offset</label>
-            <input id="view_forward" type="range" min="-4.00" max="4.00" step="0.01" />
+            <input id="view_forward" type="range" min="-12.00" max="12.00" step="0.01" />
             <span id="view_forward_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_shoulder">Shoulder Offset</label>
-            <input id="view_shoulder" type="range" min="-4.00" max="4.00" step="0.01" />
+            <input id="view_shoulder" type="range" min="-12.00" max="12.00" step="0.01" />
             <span id="view_shoulder_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_lookat_y">LookAt Height</label>
-            <input id="view_lookat_y" type="range" min="-1.00" max="6.00" step="0.01" />
+            <input id="view_lookat_y" type="range" min="-3.00" max="18.00" step="0.01" />
             <span id="view_lookat_y_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="view_fov">FOV</label>
-            <input id="view_fov" type="range" min="15" max="120" step="1" />
+            <input id="view_fov" type="range" min="15" max="180" step="1" />
             <span id="view_fov_val" class="viewVal">0</span>
           </div>
           <div class="viewControl">
             <label for="view_pitch_deg">Pitch</label>
-            <input id="view_pitch_deg" type="range" min="-80" max="80" step="0.5" />
+            <input id="view_pitch_deg" type="range" min="-240" max="240" step="0.5" />
             <span id="view_pitch_deg_val" class="viewVal">0.0</span>
           </div>
           <div class="viewControl">
             <label for="view_near">Near Clip</label>
-            <input id="view_near" type="range" min="0.001" max="1.00" step="0.001" />
+            <input id="view_near" type="range" min="0.0003" max="3.00" step="0.0001" />
             <span id="view_near_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="hand_y">Hand Vertical Offset</label>
-            <input id="hand_y" type="range" min="-1.00" max="1.00" step="0.01" />
+            <input id="hand_y" type="range" min="-3.00" max="3.00" step="0.01" />
             <span id="hand_y_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="hand_z">Hand Distance Offset</label>
-            <input id="hand_z" type="range" min="-4.00" max="4.00" step="0.01" />
+            <input id="hand_z" type="range" min="-12.00" max="12.00" step="0.01" />
             <span id="hand_z_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="hand_domino_scale">Hand Domino Size</label>
-            <input id="hand_domino_scale" type="range" min="0.05" max="12.00" step="0.05" />
+            <input id="hand_domino_scale" type="range" min="0.01" max="36.00" step="0.05" />
             <span id="hand_domino_scale_val" class="viewVal">1.00</span>
           </div>
           <div class="viewControl">
@@ -254,12 +259,12 @@
           </div>
           <div class="viewControl">
             <label for="table_domino_scale">Played Domino Size</label>
-            <input id="table_domino_scale" type="range" min="0.05" max="25.00" step="0.1" />
+            <input id="table_domino_scale" type="range" min="0.01" max="75.00" step="0.1" />
             <span id="table_domino_scale_val" class="viewVal">1.00</span>
           </div>
           <div class="viewControl">
             <label for="table_domino_tilt_deg">Played Domino Tilt</label>
-            <input id="table_domino_tilt_deg" type="range" min="0" max="35" step="0.5" />
+            <input id="table_domino_tilt_deg" type="range" min="0" max="105" step="0.5" />
             <span id="table_domino_tilt_deg_val" class="viewVal">10.0</span>
           </div>
           <div class="buttonRow">
@@ -278,42 +283,42 @@
           </div>
           <div class="viewControl">
             <label for="tune_table_scale">Table Scale</label>
-            <input id="tune_table_scale" type="range" min="0.50" max="2.50" step="0.01" />
+            <input id="tune_table_scale" type="range" min="0.17" max="7.50" step="0.01" />
             <span id="tune_table_scale_val" class="viewVal">1.00</span>
           </div>
           <div class="viewControl">
             <label for="tune_chair_scale">Chair Scale</label>
-            <input id="tune_chair_scale" type="range" min="0.50" max="2.50" step="0.01" />
+            <input id="tune_chair_scale" type="range" min="0.17" max="7.50" step="0.01" />
             <span id="tune_chair_scale_val" class="viewVal">1.00</span>
           </div>
           <div class="viewControl">
             <label for="tune_avatar_scale">Avatar Scale</label>
-            <input id="tune_avatar_scale" type="range" min="0.50" max="2.50" step="0.01" />
+            <input id="tune_avatar_scale" type="range" min="0.17" max="7.50" step="0.01" />
             <span id="tune_avatar_scale_val" class="viewVal">1.00</span>
           </div>
           <div class="viewControl">
             <label for="tune_seat_radius">Seat Radius</label>
-            <input id="tune_seat_radius" type="range" min="1.00" max="5.00" step="0.01" />
+            <input id="tune_seat_radius" type="range" min="0.33" max="15.00" step="0.01" />
             <span id="tune_seat_radius_val" class="viewVal">1.00</span>
           </div>
           <div class="viewControl">
             <label for="tune_avatar_back">Avatar Seat Back Offset</label>
-            <input id="tune_avatar_back" type="range" min="-1.00" max="1.00" step="0.01" />
+            <input id="tune_avatar_back" type="range" min="-3.00" max="3.00" step="0.01" />
             <span id="tune_avatar_back_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="tune_avatar_y">Avatar Seat Height Offset</label>
-            <input id="tune_avatar_y" type="range" min="-0.50" max="0.50" step="0.01" />
+            <input id="tune_avatar_y" type="range" min="-1.50" max="1.50" step="0.01" />
             <span id="tune_avatar_y_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="tune_chair_y">Chair Height Offset</label>
-            <input id="tune_chair_y" type="range" min="-0.50" max="0.50" step="0.01" />
+            <input id="tune_chair_y" type="range" min="-1.50" max="1.50" step="0.01" />
             <span id="tune_chair_y_val" class="viewVal">0.00</span>
           </div>
           <div class="viewControl">
             <label for="tune_table_y">Table Height Offset</label>
-            <input id="tune_table_y" type="range" min="-0.50" max="0.50" step="0.01" />
+            <input id="tune_table_y" type="range" min="-1.50" max="1.50" step="0.01" />
             <span id="tune_table_y_val" class="viewVal">0.00</span>
           </div>
           <div class="buttonRow">
@@ -332,7 +337,7 @@
           </div>
           <div class="viewControl">
             <label for="bet_amount">Base Bet</label>
-            <input id="bet_amount" type="range" min="1" max="100" step="1" />
+            <input id="bet_amount" type="range" min="1" max="300" step="1" />
             <span id="bet_amount_val" class="viewVal">10</span>
           </div>
           <div id="bettingStateText" class="smallText">Betting Off</div>
@@ -423,6 +428,7 @@
       <div class="modalPanel actionModalPanel bettingModalPanel">
         <div class="modalHeader">
           <h2 id="bettingModalTitle">Betting</h2>
+          <button id="bettingModalDragHandle" class="modalDragHandle" title="Drag betting modal">MOVE</button>
         </div>
         <div id="bettingModalBody" class="smallText">Waiting for betting choices...</div>
         <div id="bettingModalPot" class="smallText"></div>
