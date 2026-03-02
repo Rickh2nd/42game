@@ -650,6 +650,14 @@ body,
   color: var(--gold);
 }
 
+.panelSection .subhead {
+  margin: 10px 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(226, 211, 178, 0.9);
+}
+
 .networkBlock {
   margin-top: 8px;
   border-radius: 10px;

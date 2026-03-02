@@ -178,9 +178,9 @@ const decorDebugList = document.getElementById('decorDebugList');
 
 const lightingInputs = {
   decorGlobalScale: document.getElementById('decor_global_scale'),
-  floorRepeat: document.getElementById('floor_repeat'),
-  wallRepeat: document.getElementById('wall_repeat'),
-  trimRepeat: document.getElementById('trim_repeat'),
+  floorTextureScale: document.getElementById('floor_texture_scale'),
+  wallTextureScale: document.getElementById('wall_texture_scale'),
+  trimTextureScale: document.getElementById('trim_texture_scale'),
   keyIntensity: document.getElementById('light_key_intensity'),
   fillIntensity: document.getElementById('light_fill_intensity'),
   rimIntensity: document.getElementById('light_rim_intensity'),
@@ -204,9 +204,9 @@ const LIGHTING_ONLY_KEYS = [
 
 const lightingValueLabels = {
   decorGlobalScale: document.getElementById('decor_global_scale_val'),
-  floorRepeat: document.getElementById('floor_repeat_val'),
-  wallRepeat: document.getElementById('wall_repeat_val'),
-  trimRepeat: document.getElementById('trim_repeat_val'),
+  floorTextureScale: document.getElementById('floor_texture_scale_val'),
+  wallTextureScale: document.getElementById('wall_texture_scale_val'),
+  trimTextureScale: document.getElementById('trim_texture_scale_val'),
   keyIntensity: document.getElementById('light_key_intensity_val'),
   fillIntensity: document.getElementById('light_fill_intensity_val'),
   rimIntensity: document.getElementById('light_rim_intensity_val'),
@@ -217,6 +217,7 @@ const lightingValueLabels = {
   fogDensity: document.getElementById('light_fog_density_val')
 };
 const resetLightingBtn = document.getElementById('resetLightingBtn');
+const resetTextureDetailBtn = document.getElementById('resetTextureDetailBtn');
 const copyLightingBtn = document.getElementById('copyLightingBtn');
 const lightingStateText = document.getElementById('lightingStateText');
 
@@ -608,13 +609,23 @@ const ENV_HDRI_CHOICES = {
 
 const DECOR_SCALE_STORAGE_PREFIX = 'texas42_decor_scale_';
 const DECOR_SCALE_STORAGE_SUFFIX = '_v1';
-const MATERIAL_REPEAT_STORAGE_PREFIX = 'texas42_material_repeat_';
-const MATERIAL_REPEAT_STORAGE_SUFFIX = '_v1';
+const TEXTURE_DETAIL_STORAGE_PREFIX = 'tex_detail_';
 const envDecorScaleById = new Map();
-const envMaterialRepeatById = new Map();
+const envTextureDetailById = new Map();
 
-function defaultFloorRepeatForEnvironment(envId) {
-  return envId === 'casino_lounge' ? 10 : 14;
+function getEnvironmentBaseRepeats(envId) {
+  if (envId === 'casino_lounge') {
+    return {
+      floor: [10, 10],
+      walls: [4, 3],
+      trim: [10, 2]
+    };
+  }
+  return {
+    floor: [14, 14],
+    walls: [5, 4],
+    trim: [10, 2]
+  };
 }
 
 const LIGHTING_STORAGE_PREFIX = 'texas42_lighting_';
@@ -1572,8 +1583,8 @@ function decorScaleStorageKey(envId) {
   return `${DECOR_SCALE_STORAGE_PREFIX}${String(envId || 'casino_lounge')}${DECOR_SCALE_STORAGE_SUFFIX}`;
 }
 
-function materialRepeatStorageKey(envId) {
-  return `${MATERIAL_REPEAT_STORAGE_PREFIX}${String(envId || 'casino_lounge')}${MATERIAL_REPEAT_STORAGE_SUFFIX}`;
+function textureDetailStorageKey(envId, type) {
+  return `${TEXTURE_DETAIL_STORAGE_PREFIX}${String(envId || 'casino_lounge')}_${type}`;
 }
 
 function kelvinToRgb(kelvinInput) {
@@ -1627,23 +1638,23 @@ function sanitizeLightingState(settings) {
 }
 
 function sanitizeDecorScale(value) {
-  return clampValue(Number(value), 0.1, 10.0, 1.5);
+  return clampValue(Number(value), 0.25, 3.0, 1.0);
 }
 
-function defaultMaterialRepeatState(envId) {
+function defaultTextureDetailState() {
   return {
-    floorRepeat: defaultFloorRepeatForEnvironment(envId),
-    wallRepeat: 4.5,
-    trimRepeat: 10
+    floorTextureScale: 1.0,
+    wallTextureScale: 1.0,
+    trimTextureScale: 1.0
   };
 }
 
-function sanitizeMaterialRepeatState(settings, envId = 'casino_lounge') {
-  const defaults = defaultMaterialRepeatState(envId);
+function sanitizeTextureDetailState(settings) {
+  const defaults = defaultTextureDetailState();
   return {
-    floorRepeat: clampValue(Number(settings?.floorRepeat), 1, 24, defaults.floorRepeat),
-    wallRepeat: clampValue(Number(settings?.wallRepeat), 1, 24, defaults.wallRepeat),
-    trimRepeat: clampValue(Number(settings?.trimRepeat), 1, 24, defaults.trimRepeat)
+    floorTextureScale: clampValue(Number(settings?.floorTextureScale), 0.25, 8.0, defaults.floorTextureScale),
+    wallTextureScale: clampValue(Number(settings?.wallTextureScale), 0.25, 8.0, defaults.wallTextureScale),
+    trimTextureScale: clampValue(Number(settings?.trimTextureScale), 0.25, 8.0, defaults.trimTextureScale)
   };
 }
 
@@ -1652,7 +1663,7 @@ function loadDecorScaleForEnvironment(envId) {
   if (envDecorScaleById.has(id)) {
     return sanitizeDecorScale(envDecorScaleById.get(id));
   }
-  let value = 1.5;
+  let value = 1.0;
   try {
     const raw = localStorage.getItem(decorScaleStorageKey(id));
     if (raw != null) {
@@ -1661,7 +1672,7 @@ function loadDecorScaleForEnvironment(envId) {
       localStorage.setItem(decorScaleStorageKey(id), String(value));
     }
   } catch {
-    value = 1.5;
+    value = 1.0;
   }
   envDecorScaleById.set(id, value);
   return value;
@@ -1674,34 +1685,43 @@ function persistDecorScaleForEnvironment(envId, value) {
   localStorage.setItem(decorScaleStorageKey(id), String(safe));
 }
 
-function loadMaterialRepeatForEnvironment(envId) {
+function loadTextureDetailForEnvironment(envId) {
   const id = String(envId || 'casino_lounge');
-  if (envMaterialRepeatById.has(id)) {
-    return sanitizeMaterialRepeatState(envMaterialRepeatById.get(id), id);
+  if (envTextureDetailById.has(id)) {
+    return sanitizeTextureDetailState(envTextureDetailById.get(id));
   }
-  const defaults = defaultMaterialRepeatState(id);
+  const defaults = defaultTextureDetailState();
   let merged = { ...defaults };
   try {
-    const raw = localStorage.getItem(materialRepeatStorageKey(id));
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      merged = { ...defaults, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
-    } else {
-      localStorage.setItem(materialRepeatStorageKey(id), JSON.stringify(defaults));
-    }
+    const floorStored = localStorage.getItem(textureDetailStorageKey(id, 'floor'));
+    const wallStored = localStorage.getItem(textureDetailStorageKey(id, 'walls'));
+    const trimStored = localStorage.getItem(textureDetailStorageKey(id, 'trim'));
+    if (floorStored != null) merged.floorTextureScale = Number(floorStored);
+    if (wallStored != null) merged.wallTextureScale = Number(wallStored);
+    if (trimStored != null) merged.trimTextureScale = Number(trimStored);
+    if (floorStored == null) localStorage.setItem(textureDetailStorageKey(id, 'floor'), String(defaults.floorTextureScale));
+    if (wallStored == null) localStorage.setItem(textureDetailStorageKey(id, 'walls'), String(defaults.wallTextureScale));
+    if (trimStored == null) localStorage.setItem(textureDetailStorageKey(id, 'trim'), String(defaults.trimTextureScale));
   } catch {
-    merged = defaults;
+    // Ignore storage read failure and keep defaults.
   }
-  const safe = sanitizeMaterialRepeatState(merged, id);
-  envMaterialRepeatById.set(id, safe);
+  const safe = sanitizeTextureDetailState(merged);
+  envTextureDetailById.set(id, safe);
   return safe;
 }
 
-function persistMaterialRepeatForEnvironment(envId, value) {
+function persistTextureDetailForEnvironment(envId, value) {
   const id = String(envId || currentEnvironmentId || 'casino_lounge');
-  const safe = sanitizeMaterialRepeatState(value, id);
-  envMaterialRepeatById.set(id, safe);
-  localStorage.setItem(materialRepeatStorageKey(id), JSON.stringify(safe));
+  const safe = sanitizeTextureDetailState(value);
+  envTextureDetailById.set(id, safe);
+  localStorage.setItem(textureDetailStorageKey(id, 'floor'), String(safe.floorTextureScale));
+  localStorage.setItem(textureDetailStorageKey(id, 'walls'), String(safe.wallTextureScale));
+  localStorage.setItem(textureDetailStorageKey(id, 'trim'), String(safe.trimTextureScale));
+}
+
+function resetTextureDetailForEnvironment(envId) {
+  const id = String(envId || currentEnvironmentId || 'casino_lounge');
+  persistTextureDetailForEnvironment(id, defaultTextureDetailState());
 }
 
 function loadLightingForEnvironment(envId) {
@@ -1754,15 +1774,15 @@ function setLightingControlValues(settings) {
 
   const envId = currentEnvironmentId || roomState?.environmentId || 'casino_lounge';
   const decorScale = loadDecorScaleForEnvironment(envId);
-  const repeatState = loadMaterialRepeatForEnvironment(envId);
+  const textureDetail = loadTextureDetailForEnvironment(envId);
   if (lightingInputs.decorGlobalScale) lightingInputs.decorGlobalScale.value = `${decorScale}`;
   if (lightingValueLabels.decorGlobalScale) lightingValueLabels.decorGlobalScale.textContent = decorScale.toFixed(2);
-  if (lightingInputs.floorRepeat) lightingInputs.floorRepeat.value = `${repeatState.floorRepeat}`;
-  if (lightingValueLabels.floorRepeat) lightingValueLabels.floorRepeat.textContent = repeatState.floorRepeat.toFixed(2);
-  if (lightingInputs.wallRepeat) lightingInputs.wallRepeat.value = `${repeatState.wallRepeat}`;
-  if (lightingValueLabels.wallRepeat) lightingValueLabels.wallRepeat.textContent = repeatState.wallRepeat.toFixed(2);
-  if (lightingInputs.trimRepeat) lightingInputs.trimRepeat.value = `${repeatState.trimRepeat}`;
-  if (lightingValueLabels.trimRepeat) lightingValueLabels.trimRepeat.textContent = repeatState.trimRepeat.toFixed(2);
+  if (lightingInputs.floorTextureScale) lightingInputs.floorTextureScale.value = `${textureDetail.floorTextureScale}`;
+  if (lightingValueLabels.floorTextureScale) lightingValueLabels.floorTextureScale.textContent = textureDetail.floorTextureScale.toFixed(2);
+  if (lightingInputs.wallTextureScale) lightingInputs.wallTextureScale.value = `${textureDetail.wallTextureScale}`;
+  if (lightingValueLabels.wallTextureScale) lightingValueLabels.wallTextureScale.textContent = textureDetail.wallTextureScale.toFixed(2);
+  if (lightingInputs.trimTextureScale) lightingInputs.trimTextureScale.value = `${textureDetail.trimTextureScale}`;
+  if (lightingValueLabels.trimTextureScale) lightingValueLabels.trimTextureScale.textContent = textureDetail.trimTextureScale.toFixed(2);
 }
 
 function applyLightingState(settings, { persist = false } = {}) {
@@ -4651,15 +4671,15 @@ const ENV_DECOR_LAYOUTS = {
     { folder: 'industrial_wall_lamp_4k', pos: [6, 2.2, 8], rotY: 0, scale: 0.35 },
     { folder: 'fancy_picture_frame_01_4k', pos: [0, 2.0, 8], rotY: 0, scale: 0.4 },
     { folder: 'side_table_01_4k', pos: [7, 0, 6], rotY: -Math.PI / 2, scale: 0.42 },
-    { folder: 'standing_picture_frame_02_4k', pos: [7, 1.0, 6], rotY: -Math.PI / 2, scale: 0.34 },
-    { folder: 'vintage_oil_lamp_4k', pos: [7.2, 1.0, 5.8], rotY: 0, scale: 0.3 },
+    { folder: 'standing_picture_frame_02_4k', pos: [7, 1.0, 6], rotY: -Math.PI / 2, scale: 0.34, onTopOf: 'side_table_01_4k' },
+    { folder: 'vintage_oil_lamp_4k', pos: [7.2, 1.0, 5.8], rotY: 0, scale: 0.3, onTopOf: 'side_table_01_4k' },
     { folder: 'round_wooden_table_01_4k', pos: [-7, 0, 6], rotY: Math.PI / 7, scale: 0.46 }
   ],
   spooky_parlor: [
     { folder: 'wooden_bookshelf_worn_4k', pos: [-7.5, 0, 7.5], rotY: Math.PI / 6, scale: 0.44 },
-    { folder: 'decorative_book_set_01_4k', pos: [-7.0, 1.4, 7.2], rotY: 0, scale: 0.28 },
+    { folder: 'decorative_book_set_01_4k', pos: [-7.0, 1.4, 7.2], rotY: 0, scale: 0.28, onTopOf: 'wooden_bookshelf_worn_4k' },
     { folder: 'side_table_tall_01_4k', pos: [7.5, 0, 7.0], rotY: -Math.PI / 5, scale: 0.4 },
-    { folder: 'vintage_oil_lamp_4k', pos: [7.5, 1.1, 7.0], rotY: 0, scale: 0.3 },
+    { folder: 'vintage_oil_lamp_4k', pos: [7.5, 1.1, 7.0], rotY: 0, scale: 0.3, onTopOf: 'side_table_tall_01_4k' },
     { folder: 'hanging_picture_frame_03_4k', pos: [-1.5, 2.0, 8.0], rotY: 0, scale: 0.38 },
     { folder: 'lightbulb_led_4k', pos: [4.5, 3.5, 6.5], rotY: 0, scale: 0.34 }
   ],
@@ -4668,15 +4688,15 @@ const ENV_DECOR_LAYOUTS = {
     { folder: 'wooden_table_02_4k', pos: [-6.5, 0, 6.5], rotY: Math.PI / 5, scale: 0.43 },
     { folder: 'Shelf_01_4k', pos: [7.5, 0, 7.5], rotY: -Math.PI / 8, scale: 0.44 },
     { folder: 'industrial_wall_lamp_4k', pos: [0, 2.2, 8], rotY: 0, scale: 0.34 },
-    { folder: 'decorative_book_set_01_4k', pos: [7.0, 1.3, 7.4], rotY: 0, scale: 0.28 },
-    { folder: 'vintage_oil_lamp_4k', pos: [0.4, 1.0, 7.2], rotY: 0, scale: 0.3 }
+    { folder: 'decorative_book_set_01_4k', pos: [7.0, 1.3, 7.4], rotY: 0, scale: 0.28, onTopOf: 'Shelf_01_4k' },
+    { folder: 'vintage_oil_lamp_4k', pos: [0.4, 1.0, 7.2], rotY: 0, scale: 0.3, onTopOf: 'WoodenTable_01_4k' }
   ],
   modern_suite: [
     { folder: 'modern_coffee_table_01_4k', pos: [0, 0, 7.5], rotY: 0, scale: 0.45 },
     { folder: 'steel_frame_shelves_03_4k', pos: [-7.5, 0, 7.5], rotY: Math.PI / 8, scale: 0.44 },
     { folder: 'steel_frame_shelves_02_4k', pos: [7.5, 0, 7.5], rotY: -Math.PI / 8, scale: 0.44 },
-    { folder: 'desk_lamp_arm_01_4k', pos: [0.6, 0.9, 7.3], rotY: 0, scale: 0.3 },
-    { folder: 'standing_picture_frame_02_4k', pos: [7.2, 1.4, 7.3], rotY: 0, scale: 0.34 },
+    { folder: 'desk_lamp_arm_01_4k', pos: [0.6, 0.9, 7.3], rotY: 0, scale: 0.3, onTopOf: 'modern_coffee_table_01_4k' },
+    { folder: 'standing_picture_frame_02_4k', pos: [7.2, 1.4, 7.3], rotY: 0, scale: 0.34, onTopOf: 'steel_frame_shelves_02_4k' },
     { folder: 'fancy_picture_frame_01_4k', pos: [0, 2.0, 8.0], rotY: 0, scale: 0.38 }
   ],
   neon_arcade: [
@@ -4685,7 +4705,7 @@ const ENV_DECOR_LAYOUTS = {
     { folder: 'lightbulb_led_4k', pos: [-7.0, 3.2, 7.0], rotY: 0, scale: 0.34 },
     { folder: 'lightbulb_led_4k', pos: [7.0, 3.2, 7.0], rotY: 0, scale: 0.34 },
     { folder: 'modern_coffee_table_01_4k', pos: [0, 0, 7.5], rotY: 0, scale: 0.45 },
-    { folder: 'desk_lamp_arm_01_4k', pos: [0.6, 0.9, 7.3], rotY: 0, scale: 0.3 },
+    { folder: 'desk_lamp_arm_01_4k', pos: [0.6, 0.9, 7.3], rotY: 0, scale: 0.3, onTopOf: 'modern_coffee_table_01_4k' },
     { folder: 'hanging_picture_frame_03_4k', pos: [0, 2.0, 8.0], rotY: 0, scale: 0.38 }
   ]
 };
@@ -4699,50 +4719,72 @@ const PROP_SCALE_OVERRIDES = {
 function getDecorCategory(folderName) {
   const folder = String(folderName || '').toLowerCase();
   if (!folder) return 'default';
+  if (folder.includes('standing_picture_frame')) return 'standing_frame';
+  if (folder.includes('hanging_picture_frame') || folder.includes('fancy_picture_frame') || folder.includes('picture_frame')) return 'wall_frame';
   if (folder.includes('bookshelf')) return 'bookshelf';
   if (folder.includes('shelves') || folder.includes('shelf')) return 'shelf';
   if (folder.includes('book_set')) return 'book_set';
   if (folder.includes('lightbulb')) return 'lightbulb';
   if (folder.includes('wall_lamp')) return 'wall_lamp';
-  if (folder.includes('lamp')) return 'standing_lamp';
+  if (folder.includes('desk_lamp')) return 'desk_lamp';
+  if (folder.includes('oil_lamp')) return 'oil_lamp';
   if (folder.includes('coffee_table')) return 'coffee_table';
   if (folder.includes('side_table') && folder.includes('tall')) return 'tall_side_table';
   if (folder.includes('table')) return 'side_table';
-  if (folder.includes('picture_frame') || folder.includes('hanging_picture_frame') || folder.includes('fancy_picture_frame') || folder.includes('frame')) return 'picture_frame';
+  if (folder.includes('lamp')) return 'standing_lamp';
+  if (folder.includes('frame')) return 'wall_frame';
   return 'default';
 }
 
-function targetHeightForPropFolder(folderName, ref) {
+function targetHeightMetersForProp(folderName) {
   const category = getDecorCategory(folderName);
-  const safeRef = Math.max(0.1, Number(ref) || 5);
   switch (category) {
     case 'bookshelf':
     case 'shelf':
-      return safeRef * 0.55;
-    case 'wall_lamp':
-      return safeRef * 0.12;
-    case 'standing_lamp':
-      return safeRef * 0.35;
-    case 'tall_side_table':
-      return safeRef * 0.24;
+      return 2.05;
     case 'coffee_table':
-      return safeRef * 0.14;
+      return 0.45;
     case 'side_table':
-      return safeRef * 0.18;
-    case 'picture_frame':
-      return safeRef * 0.16;
+      return 0.6;
+    case 'tall_side_table':
+      return 0.85;
+    case 'wall_lamp':
+      return 0.48;
+    case 'desk_lamp':
+      return 0.45;
+    case 'oil_lamp':
+      return 0.3;
+    case 'standing_lamp':
+      return 1.4;
+    case 'wall_frame':
+    case 'standing_frame':
+      return 0.65;
     case 'book_set':
-      return safeRef * 0.06;
+      return 0.22;
     case 'lightbulb':
-      return safeRef * 0.05;
+      return 0.15;
     default:
-      return safeRef * 0.20;
+      return 1.2;
   }
 }
 
-function isWallDecor(folderName) {
+function isWallMountedDecor(folderName) {
   const category = getDecorCategory(folderName);
-  return category === 'wall_lamp' || category === 'picture_frame';
+  return category === 'wall_lamp' || category === 'wall_frame';
+}
+
+function isStandingFrame(folderName) {
+  return getDecorCategory(folderName) === 'standing_frame';
+}
+
+function isTabletopDecor(folderName) {
+  const category = getDecorCategory(folderName);
+  return category === 'desk_lamp' || category === 'oil_lamp' || category === 'book_set' || category === 'standing_frame';
+}
+
+function isShelfLike(folderName) {
+  const category = getDecorCategory(folderName);
+  return category === 'shelf' || category === 'bookshelf';
 }
 
 function snapPropToFloor(model, floorY = FLOOR_Y, pad = 0.01) {
@@ -4751,16 +4793,77 @@ function snapPropToFloor(model, floorY = FLOOR_Y, pad = 0.01) {
   model.position.y += (floorY + pad - box.min.y);
 }
 
-function alignPropToBackWall(model, backWallZ, pad = 0.01, faceIntoRoom = true) {
+function snapPropBottomToY(model, targetY, pad = 0.005) {
+  const box = new THREE.Box3().setFromObject(model);
+  if (!Number.isFinite(box.min.y)) return;
+  model.position.y += (targetY + pad - box.min.y);
+}
+
+function alignPropToBackWall(model, backWallZ, pad = 0.01) {
   const box = new THREE.Box3().setFromObject(model);
   if (!Number.isFinite(box.max.z)) return;
   model.position.z += (backWallZ - pad - box.max.z);
-  if (faceIntoRoom) model.rotation.y = Math.PI;
 }
 
-function clampToRoom(model, leftX, rightX, nearZ, farZ) {
-  model.position.x = THREE.MathUtils.clamp(model.position.x, leftX, rightX);
-  model.position.z = THREE.MathUtils.clamp(model.position.z, nearZ, farZ);
+function orientYawTowardPoint(model, targetX, targetZ) {
+  tmpV3A.set(targetX, model.position.y, targetZ);
+  model.lookAt(tmpV3A);
+  model.rotation.x = 0;
+  model.rotation.z = 0;
+}
+
+function clampPropInsideRoom(model, bounds, pad = 0.01) {
+  const leftX = Number(bounds?.leftX ?? -9);
+  const rightX = Number(bounds?.rightX ?? 9);
+  const backZ = Number(bounds?.backZ ?? -10);
+  const frontZ = Number(bounds?.frontZ ?? 10);
+  const floorY = Number(bounds?.floorY ?? FLOOR_Y);
+  const ceilingY = Number(bounds?.ceilingY ?? 5.2);
+
+  for (let i = 0; i < 3; i += 1) {
+    const box = new THREE.Box3().setFromObject(model);
+    if (!Number.isFinite(box.min.x)) break;
+    if (box.min.y < floorY + pad) model.position.y += (floorY + pad - box.min.y);
+    if (box.max.y > ceilingY - pad) model.position.y -= (box.max.y - (ceilingY - pad));
+    if (box.min.x < leftX + pad) model.position.x += (leftX + pad - box.min.x);
+    if (box.max.x > rightX - pad) model.position.x -= (box.max.x - (rightX - pad));
+    if (box.min.z < backZ + pad) model.position.z += (backZ + pad - box.min.z);
+    if (box.max.z > frontZ - pad) model.position.z -= (box.max.z - (frontZ - pad));
+  }
+}
+
+function fitPropToSupportSurface(model, supportModel, desiredX, desiredZ) {
+  if (!supportModel) return false;
+  const supportBox = new THREE.Box3().setFromObject(supportModel);
+  if (!Number.isFinite(supportBox.min.x)) return false;
+  const supportSize = new THREE.Vector3();
+  supportBox.getSize(supportSize);
+
+  let objectBox = new THREE.Box3().setFromObject(model);
+  const objectSize = new THREE.Vector3();
+  objectBox.getSize(objectSize);
+
+  const objectFootprint = Math.max(objectSize.x, objectSize.z);
+  const supportFootprint = Math.max(0.0001, Math.min(supportSize.x, supportSize.z) * 0.8);
+  if (objectFootprint > supportFootprint) {
+    const fitScale = THREE.MathUtils.clamp(supportFootprint / objectFootprint, 0.2, 1.0);
+    model.scale.multiplyScalar(fitScale);
+    model.updateWorldMatrix(true, true);
+    objectBox = new THREE.Box3().setFromObject(model);
+    objectBox.getSize(objectSize);
+  }
+
+  const marginX = Math.max(0.02, objectSize.x * 0.55);
+  const marginZ = Math.max(0.02, objectSize.z * 0.55);
+  const targetX = THREE.MathUtils.clamp(desiredX, supportBox.min.x + marginX, supportBox.max.x - marginX);
+  const targetZ = THREE.MathUtils.clamp(desiredZ, supportBox.min.z + marginZ, supportBox.max.z - marginZ);
+  const center = new THREE.Vector3();
+  objectBox.getCenter(center);
+  model.position.x += (targetX - center.x);
+  model.position.z += (targetZ - center.z);
+  model.updateWorldMatrix(true, true);
+  snapPropBottomToY(model, supportBox.max.y, 0.005);
+  return true;
 }
 
 function quantizeRightAngle(rad) {
@@ -4769,10 +4872,11 @@ function quantizeRightAngle(rad) {
 
 function getDecorReferenceMetrics() {
   const metrics = {
+    avatarHeightWorld: 0,
+    worldUnitsPerMeter: 1,
     tableDiameter: 0,
     chairHeight: 0,
-    avatarHeight: 0,
-    ref: 5
+    avatarHeight: 0
   };
 
   const tableNode = environmentGroup.getObjectByName('tableModel') || tableRoot;
@@ -4795,21 +4899,27 @@ function getDecorReferenceMetrics() {
     }
   }
 
-  const avatarNode = avatarSeatGroups.find((group) => group && group.children && group.children.length) || null;
+  const avatarNode = avatarSeatGroups[0]?.children?.length
+    ? avatarSeatGroups[0]
+    : (avatarSeatGroups.find((group) => group && group.children && group.children.length) || null);
   if (avatarNode) {
     const box = new THREE.Box3().setFromObject(avatarNode);
     if (Number.isFinite(box.min.y) && Number.isFinite(box.max.y)) {
       const size = new THREE.Vector3();
       box.getSize(size);
       metrics.avatarHeight = size.y;
+      metrics.avatarHeightWorld = size.y;
     }
   }
 
-  metrics.ref = Number.isFinite(metrics.tableDiameter) && metrics.tableDiameter > 0.001
-    ? metrics.tableDiameter
-    : (Number.isFinite(metrics.chairHeight) && metrics.chairHeight > 0.001
-      ? metrics.chairHeight
-      : (Number.isFinite(metrics.avatarHeight) && metrics.avatarHeight > 0.001 ? metrics.avatarHeight : 5.0));
+  if (Number.isFinite(metrics.avatarHeightWorld) && metrics.avatarHeightWorld > 0.001) {
+    metrics.worldUnitsPerMeter = metrics.avatarHeightWorld / 1.778;
+  } else if (Number.isFinite(metrics.chairHeight) && metrics.chairHeight > 0.001) {
+    metrics.worldUnitsPerMeter = metrics.chairHeight / 1.0;
+  } else {
+    metrics.worldUnitsPerMeter = 1;
+  }
+  metrics.worldUnitsPerMeter = Math.max(0.01, metrics.worldUnitsPerMeter);
   return metrics;
 }
 
@@ -4900,20 +5010,138 @@ async function loadDecorModelFromCatalogEntry(entry) {
   }
 }
 
+function getRoomBounds(roomLayout = {}) {
+  const width = Number(roomLayout.width || 18);
+  const depth = Number(roomLayout.depth || 20);
+  const wallHeight = Number(roomLayout.wallHeight || 5.2);
+  return {
+    leftX: -width * 0.5,
+    rightX: width * 0.5,
+    backZ: Number.isFinite(roomLayout.backWallZ) ? Number(roomLayout.backWallZ) : (-depth * 0.5),
+    frontZ: depth * 0.5,
+    floorY: FLOOR_Y,
+    ceilingY: wallHeight
+  };
+}
+
+function registerPlacedProp(map, folder, model) {
+  const key = String(folder || '');
+  if (!key) return;
+  const list = map.get(key) || [];
+  list.push(model);
+  map.set(key, list);
+}
+
+function resolveSupportProp(map, supportName) {
+  const key = String(supportName || '');
+  if (!key) return null;
+  const list = map.get(key);
+  if (!list || !list.length) return null;
+  return list[list.length - 1];
+}
+
+function maybeScalePropToTargetHeight(model, folder, worldUnitsPerMeter, decorGlobalScale) {
+  tmpBox.setFromObject(model);
+  if (!Number.isFinite(tmpBox.min.y) || !Number.isFinite(tmpBox.max.y)) {
+    return { targetMeters: 0, finalScale: 1, beforeHeight: 0 };
+  }
+  const beforeHeight = Math.max(tmpBox.max.y - tmpBox.min.y, 0.0001);
+  const targetMeters = targetHeightMetersForProp(folder);
+  const targetHeightWorld = Math.max(0.01, targetMeters * Math.max(0.01, worldUnitsPerMeter));
+  const autoScale = THREE.MathUtils.clamp(targetHeightWorld / beforeHeight, 0.02, 200);
+  const overrideScale = Number(PROP_SCALE_OVERRIDES[String(folder)] ?? 1);
+  const finalScale = autoScale * overrideScale * decorGlobalScale;
+  model.scale.multiplyScalar(finalScale);
+  return { targetMeters, finalScale, beforeHeight };
+}
+
+function populateShelfWithBooks({
+  shelfModel,
+  bookTemplate,
+  worldUnitsPerMeter,
+  roomBounds,
+  tableCenter
+}) {
+  if (!shelfModel || !bookTemplate) return [];
+  const placements = [];
+  const shelfBox = new THREE.Box3().setFromObject(shelfModel);
+  if (!Number.isFinite(shelfBox.min.x)) return placements;
+  const shelfSize = new THREE.Vector3();
+  shelfBox.getSize(shelfSize);
+
+  const levelFractions = [0.25, 0.4, 0.55, 0.7, 0.85];
+  const desiredLevels = shelfSize.y > 3.2 ? 5 : (shelfSize.y > 2.1 ? 4 : 3);
+  const levels = levelFractions.slice(0, desiredLevels);
+  const targetBookHeight = Math.max(0.03, 0.2 * worldUnitsPerMeter);
+
+  const shelfCenter = new THREE.Vector3();
+  shelfBox.getCenter(shelfCenter);
+  tmpV3A.set(tableCenter.x - shelfCenter.x, 0, tableCenter.z - shelfCenter.z);
+  if (tmpV3A.lengthSq() < 0.0001) tmpV3A.set(0, 0, 1);
+  tmpV3A.normalize();
+  const forward = tmpV3A.clone();
+  const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize();
+
+  const spanX = Math.max(0.4, shelfSize.x * 0.74);
+  const rows = Math.max(6, Math.min(14, Math.floor(spanX / Math.max(0.08, targetBookHeight * 0.52))));
+  const shelfFrontInset = Math.max(0.04, shelfSize.z * 0.12);
+  const maxY = shelfBox.max.y - 0.03;
+
+  for (let levelIndex = 0; levelIndex < levels.length; levelIndex += 1) {
+    const frac = levels[levelIndex];
+    const shelfY = THREE.MathUtils.clamp(shelfBox.min.y + shelfSize.y * frac, shelfBox.min.y + 0.04, maxY);
+    for (let i = 0; i < rows; i += 1) {
+      const t = rows === 1 ? 0.5 : i / (rows - 1);
+      const xOffset = (t - 0.5) * spanX;
+      const zOffset = shelfFrontInset;
+      const jitter = Math.sin((i + 1) * (levelIndex + 2) * 1.37) * 0.015;
+
+      const { scene: book } = clonedModelAsset(bookTemplate);
+      tuneImportedMaterials(book);
+      book.position.set(
+        shelfCenter.x + right.x * xOffset + forward.x * zOffset,
+        shelfY,
+        shelfCenter.z + right.z * xOffset + forward.z * zOffset
+      );
+      const yaw = Math.atan2(forward.x, forward.z) + jitter;
+      book.rotation.set(0, yaw, 0);
+      book.scale.setScalar(1);
+      book.updateWorldMatrix(true, true);
+      const bookBox = new THREE.Box3().setFromObject(book);
+      const bookH = Math.max(bookBox.max.y - bookBox.min.y, 0.0001);
+      const scale = THREE.MathUtils.clamp((targetBookHeight / bookH) * (0.9 + 0.15 * ((i + levelIndex) % 3)), 0.1, 8);
+      book.scale.multiplyScalar(scale);
+      book.updateWorldMatrix(true, true);
+      snapPropBottomToY(book, shelfY, 0.0025);
+      clampPropInsideRoom(book, roomBounds, 0.01);
+      placements.push(book);
+    }
+  }
+  return placements;
+}
+
 async function addEnvironmentDecor(roomRoot, environmentId, roomLayout = {}) {
   const layout = ENV_DECOR_LAYOUTS[environmentId] || [];
   const catalog = await fetchSharedPropCatalog();
   const byFolder = new Map((catalog || []).map((entry) => [String(entry.folder), entry]));
+  const placedByFolder = new Map();
   decorDebugState.props = [];
   decorDebugState.failures = [];
   decorDebugState.requested = layout.length;
   const decorGlobalScale = loadDecorScaleForEnvironment(environmentId);
   const refMetrics = getDecorReferenceMetrics();
+  const worldUnitsPerMeter = Math.max(0.01, Number(refMetrics.worldUnitsPerMeter) || 1);
+  const roomBounds = getRoomBounds(roomLayout);
+  const tableCenterLocal = new THREE.Vector3(0, Number.isFinite(tableMetrics.topY) ? tableMetrics.topY : 0.9, 0);
+  const tableCenterWorld = tableCenterLocal.clone();
+  roomRoot.localToWorld(tableCenterWorld);
+
   console.log('[decor] ref', {
+    avatarH_world: Number(refMetrics.avatarHeightWorld?.toFixed?.(4) || 0),
+    worldUnitsPerMeter: Number(worldUnitsPerMeter.toFixed(4)),
     tableDiameter: Number(refMetrics.tableDiameter?.toFixed?.(4) || 0),
     chairHeight: Number(refMetrics.chairHeight?.toFixed?.(4) || 0),
-    avatarHeight: Number(refMetrics.avatarHeight?.toFixed?.(4) || 0),
-    ref: Number(refMetrics.ref?.toFixed?.(4) || 0)
+    avatarHeight: Number(refMetrics.avatarHeight?.toFixed?.(4) || 0)
   });
   const missingExpected = SHARED_PROP_FOLDERS.filter((folder) => !byFolder.has(folder));
   if (missingExpected.length) {
@@ -4923,6 +5151,17 @@ async function addEnvironmentDecor(roomRoot, environmentId, roomLayout = {}) {
   const decorRoot = new THREE.Group();
   decorRoot.name = 'envDecorRoot';
   roomRoot.add(decorRoot);
+  let spawnedShelfBooks = 0;
+
+  let bookTemplate = null;
+  const bookEntry = byFolder.get('decorative_book_set_01_4k');
+  if (bookEntry?.modelUrl) {
+    try {
+      bookTemplate = await loadModelTemplate(bookEntry.modelUrl);
+    } catch (error) {
+      console.warn('[decor] shelf book template unavailable', bookEntry.modelUrl, error);
+    }
+  }
 
   for (const spec of layout) {
     const entry = byFolder.get(spec.folder);
@@ -4949,48 +5188,90 @@ async function addEnvironmentDecor(roomRoot, environmentId, roomLayout = {}) {
     model.updateWorldMatrix(true, true);
     tmpBox.setFromObject(model);
     if (Number.isFinite(tmpBox.min.y) && Number.isFinite(tmpBox.max.y)) {
-      const beforeHeight = Math.max(tmpBox.max.y - tmpBox.min.y, 0.0001);
-      const targetHeight = targetHeightForPropFolder(spec.folder, refMetrics.ref);
-      const autoScale = THREE.MathUtils.clamp(targetHeight / beforeHeight, 0.05, 50);
-      const overrideScale = Number(PROP_SCALE_OVERRIDES[String(spec.folder)] ?? 1);
-      const finalScale = autoScale * overrideScale * decorGlobalScale;
-      model.scale.multiplyScalar(finalScale);
+      const { targetMeters, finalScale, beforeHeight } = maybeScalePropToTargetHeight(
+        model,
+        spec.folder,
+        worldUnitsPerMeter,
+        decorGlobalScale
+      );
       if (!loggedDecorScaleFolders.has(String(spec.folder))) {
         loggedDecorScaleFolders.add(String(spec.folder));
         console.log('[decor] scaled', spec.folder, {
           beforeH: Number(beforeHeight.toFixed(4)),
-          target: Number(targetHeight.toFixed(4)),
+          targetH_m: Number(targetMeters.toFixed(3)),
           scale: Number(finalScale.toFixed(4)),
-          decorScale: Number(decorGlobalScale.toFixed(4))
+          decorScale: Number(decorGlobalScale.toFixed(4)),
+          worldUnitsPerMeter: Number(worldUnitsPerMeter.toFixed(4))
         });
       }
       model.updateWorldMatrix(true, true);
       const category = getDecorCategory(spec.folder);
-      const wallItem = isWallDecor(spec.folder);
+      const wallItem = isWallMountedDecor(spec.folder);
+      const supportModel = resolveSupportProp(placedByFolder, spec.onTopOf);
+
       if (wallItem) {
-        const backWallZ = Number(roomLayout.backWallZ ?? -(Number(roomLayout.depth || 20) * 0.5));
-        alignPropToBackWall(model, backWallZ, 0.01, true);
+        alignPropToBackWall(model, roomBounds.backZ, 0.02);
       } else {
         snapPropToFloor(model, FLOOR_Y, 0.01);
       }
-      if (category === 'shelf' || category === 'bookshelf' || category === 'side_table' || category === 'tall_side_table' || category === 'coffee_table') {
+
+      if (supportModel && isTabletopDecor(spec.folder)) {
+        fitPropToSupportSurface(model, supportModel, desiredX, desiredZ);
+      }
+
+      if (
+        category === 'shelf' ||
+        category === 'bookshelf' ||
+        category === 'side_table' ||
+        category === 'tall_side_table' ||
+        category === 'coffee_table'
+      ) {
         model.rotation.y = quantizeRightAngle(model.rotation.y);
       }
-      const pad = 0.3;
-      const halfW = Number(roomLayout.width || 18) * 0.5;
-      const halfD = Number(roomLayout.depth || 20) * 0.5;
-      clampToRoom(model, -halfW + pad, halfW - pad, -halfD + pad, halfD - pad);
-      snapPropToFloor(model, FLOOR_Y, 0.01);
+
+      if (wallItem || isStandingFrame(spec.folder)) {
+        orientYawTowardPoint(model, tableCenterWorld.x, tableCenterWorld.z);
+        if (category === 'wall_frame' || category === 'standing_frame') {
+          model.rotation.y += Math.PI;
+        }
+      }
+
+      clampPropInsideRoom(model, roomBounds, 0.02);
+      if (supportModel && isTabletopDecor(spec.folder)) {
+        fitPropToSupportSurface(model, supportModel, desiredX, desiredZ);
+      } else if (!wallItem) {
+        snapPropToFloor(model, FLOOR_Y, 0.01);
+      }
     }
     decorRoot.add(model);
+    registerPlacedProp(placedByFolder, spec.folder, model);
     decorDebugState.props.push({
       name: spec.folder,
       modelUrl,
       object3d: model
     });
+
+    if (isShelfLike(spec.folder) && bookTemplate) {
+      const books = populateShelfWithBooks({
+        shelfModel: model,
+        bookTemplate,
+        worldUnitsPerMeter,
+        roomBounds,
+        tableCenter: tableCenterWorld
+      });
+      for (const book of books) {
+        decorRoot.add(book);
+        decorDebugState.props.push({
+          name: `${spec.folder}:books`,
+          modelUrl: bookEntry?.modelUrl || '',
+          object3d: book
+        });
+      }
+      spawnedShelfBooks += books.length;
+    }
   }
 
-  updateDecorStatusText(`Decor: ${decorDebugState.props.length}/${decorDebugState.requested} loaded (${environmentId}) | scale ${decorGlobalScale.toFixed(2)}`);
+  updateDecorStatusText(`Decor: ${decorDebugState.props.length}/${decorDebugState.requested} loaded (${environmentId}) | scale ${decorGlobalScale.toFixed(2)} | books ${spawnedShelfBooks}`);
   if (decorDebugList) {
     const loadedLines = decorDebugState.props.map((entry) => `${entry.name} (${entry.modelUrl || 'NO_MODEL_URL'})`);
     const failedLines = decorDebugState.failures.map((line) => `FAIL ${line}`);
@@ -5090,10 +5371,20 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   addCasinoTrim(roomRoot, roomWidth, roomDepth, wallHeight, trimMaterial);
   themeGroup.add(roomRoot);
 
-  const repeatState = loadMaterialRepeatForEnvironment(environmentId);
-  const floorRepeat = [Number(repeatState.floorRepeat), Number(repeatState.floorRepeat)];
-  const wallRepeat = [Number(repeatState.wallRepeat), Math.max(1, Number(repeatState.wallRepeat) - 1)];
-  const trimRepeat = [Number(repeatState.trimRepeat), 2];
+  const textureDetail = loadTextureDetailForEnvironment(environmentId);
+  const baseRepeat = getEnvironmentBaseRepeats(environmentId);
+  const floorRepeat = [
+    Number(baseRepeat.floor[0] * textureDetail.floorTextureScale),
+    Number(baseRepeat.floor[1] * textureDetail.floorTextureScale)
+  ];
+  const wallRepeat = [
+    Number(baseRepeat.walls[0] * textureDetail.wallTextureScale),
+    Number(baseRepeat.walls[1] * textureDetail.wallTextureScale)
+  ];
+  const trimRepeat = [
+    Number(baseRepeat.trim[0] * textureDetail.trimTextureScale),
+    Number(baseRepeat.trim[1] * textureDetail.trimTextureScale)
+  ];
   const envRoot = environmentRootFor(entry);
   const envStatus = {
     envId: environmentId,
@@ -5139,7 +5430,7 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   if (floorRoughTex) floorMaterial.roughnessMap = floorRoughTex;
   if (floorAoTex) floorMaterial.aoMap = floorAoTex;
   floorMaterial.aoMapIntensity = floorAoTex ? 0.8 : 0;
-  floorMaterial.normalScale.set(0.8, 0.8);
+  floorMaterial.normalScale.set(0.9, 0.9);
   floorMaterial.roughness = environmentId === 'casino_lounge' ? 0.75 : 0.55;
   floorMaterial.needsUpdate = true;
 
@@ -5157,7 +5448,7 @@ async function buildRoomEnvironment(entry, token, environmentId) {
   if (trimRoughTex) trimMaterial.roughnessMap = trimRoughTex;
   if (trimAoTex) trimMaterial.aoMap = trimAoTex;
   trimMaterial.aoMapIntensity = trimAoTex ? 0.7 : 0;
-  trimMaterial.normalScale.set(0.6, 0.6);
+  trimMaterial.normalScale.set(0.7, 0.7);
   trimMaterial.roughness = 0.45;
   trimMaterial.needsUpdate = true;
 
@@ -6689,29 +6980,36 @@ function ensureButtons() {
     applyEnvironment(envId, { force: true });
   });
 
-  lightingInputs.floorRepeat?.addEventListener('input', () => {
+  lightingInputs.floorTextureScale?.addEventListener('input', () => {
     const envId = currentEnvironmentId || roomState?.environmentId || environmentSelect.value || 'casino_lounge';
-    const repeats = loadMaterialRepeatForEnvironment(envId);
-    repeats.floorRepeat = clampValue(Number(lightingInputs.floorRepeat.value), 1, 24, defaultFloorRepeatForEnvironment(envId));
-    persistMaterialRepeatForEnvironment(envId, repeats);
+    const detail = loadTextureDetailForEnvironment(envId);
+    detail.floorTextureScale = clampValue(Number(lightingInputs.floorTextureScale.value), 0.25, 8, 1);
+    persistTextureDetailForEnvironment(envId, detail);
     setLightingControlValues(activeLightingState || makeDefaultLightingState(envId));
     applyEnvironment(envId, { force: true });
   });
 
-  lightingInputs.wallRepeat?.addEventListener('input', () => {
+  lightingInputs.wallTextureScale?.addEventListener('input', () => {
     const envId = currentEnvironmentId || roomState?.environmentId || environmentSelect.value || 'casino_lounge';
-    const repeats = loadMaterialRepeatForEnvironment(envId);
-    repeats.wallRepeat = clampValue(Number(lightingInputs.wallRepeat.value), 1, 24, 4.5);
-    persistMaterialRepeatForEnvironment(envId, repeats);
+    const detail = loadTextureDetailForEnvironment(envId);
+    detail.wallTextureScale = clampValue(Number(lightingInputs.wallTextureScale.value), 0.25, 8, 1);
+    persistTextureDetailForEnvironment(envId, detail);
     setLightingControlValues(activeLightingState || makeDefaultLightingState(envId));
     applyEnvironment(envId, { force: true });
   });
 
-  lightingInputs.trimRepeat?.addEventListener('input', () => {
+  lightingInputs.trimTextureScale?.addEventListener('input', () => {
     const envId = currentEnvironmentId || roomState?.environmentId || environmentSelect.value || 'casino_lounge';
-    const repeats = loadMaterialRepeatForEnvironment(envId);
-    repeats.trimRepeat = clampValue(Number(lightingInputs.trimRepeat.value), 1, 24, 10);
-    persistMaterialRepeatForEnvironment(envId, repeats);
+    const detail = loadTextureDetailForEnvironment(envId);
+    detail.trimTextureScale = clampValue(Number(lightingInputs.trimTextureScale.value), 0.25, 8, 1);
+    persistTextureDetailForEnvironment(envId, detail);
+    setLightingControlValues(activeLightingState || makeDefaultLightingState(envId));
+    applyEnvironment(envId, { force: true });
+  });
+
+  resetTextureDetailBtn?.addEventListener('click', () => {
+    const envId = currentEnvironmentId || roomState?.environmentId || environmentSelect.value || 'casino_lounge';
+    resetTextureDetailForEnvironment(envId);
     setLightingControlValues(activeLightingState || makeDefaultLightingState(envId));
     applyEnvironment(envId, { force: true });
   });
@@ -6824,10 +7122,13 @@ function ensureButtons() {
     model.position.set(0, FLOOR_Y, -6);
     model.scale.setScalar(1);
     decorRoot.add(model);
-    const ref = getDecorReferenceMetrics().ref;
+    const refMetrics = getDecorReferenceMetrics();
+    const worldUnitsPerMeter = Math.max(0.01, Number(refMetrics.worldUnitsPerMeter) || 1);
     const boxBefore = new THREE.Box3().setFromObject(model);
     const h = Math.max(boxBefore.max.y - boxBefore.min.y, 0.0001);
-    const scale = THREE.MathUtils.clamp((ref * 0.18) / h, 0.05, 200) * loadDecorScaleForEnvironment(currentEnvironmentId || 'casino_lounge');
+    const targetHeightWorld = 0.6 * worldUnitsPerMeter;
+    const scale = THREE.MathUtils.clamp(targetHeightWorld / h, 0.02, 200)
+      * loadDecorScaleForEnvironment(currentEnvironmentId || 'casino_lounge');
     model.scale.multiplyScalar(scale);
     snapPropToFloor(model, FLOOR_Y, 0.01);
     const boxAfter = new THREE.Box3().setFromObject(model);

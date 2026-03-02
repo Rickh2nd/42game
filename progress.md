@@ -698,3 +698,42 @@ Validation:
 - `node --check client/main.js` pass
 - `node --check server/server.js` pass
 - local smoke: `/health` and shared assets endpoints return 200.
+
+Update (avatar-meter decor scaling + texture detail control pass):
+- Reworked decor scaling to use avatar height as the real-world anchor:
+  - `getDecorReferenceMetrics()` now computes `worldUnitsPerMeter` from seat 0 avatar height with 1.778m baseline.
+  - prop target sizing now uses meter-based category defaults (shelves/bookshelves, side/coffee/tall tables, wall/desk/oil lamps, frames, books, bulbs).
+- Added robust decor placement helpers:
+  - room-bounds clamp with floor/ceiling and x/z limits (`clampPropInsideRoom`)
+  - back-wall snapping (`alignPropToBackWall`)
+  - tabletop/surface placement and footprint fitting (`fitPropToSupportSurface`)
+  - bottom snap helper (`snapPropBottomToY`).
+- Updated environment decor layout entries with `onTopOf` support links so tabletop props (lamps/standing frames/book sets) sit on supports correctly.
+- Added bookshelf multi-level book population:
+  - clones of `decorative_book_set_01_4k` are distributed across 3–5 shelf levels with multiple placements per level.
+- Frame orientation fix:
+  - wall and standing frames are oriented toward table center and yaw-corrected.
+- Added per-environment texture detail controls and persistence:
+  - new slider ids: `floor_texture_scale`, `wall_texture_scale`, `trim_texture_scale`
+  - range: 0.25..8.0, default 1.0
+  - per-env storage keys: `tex_detail_<envId>_floor`, `tex_detail_<envId>_walls`, `tex_detail_<envId>_trim`
+  - added `Reset Texture Detail` button.
+- Updated repeat application to `baseRepeat * textureScale` for base/normal/roughness/AO maps.
+- Decor global scale tuned to requested defaults/range:
+  - range 0.25..3.0, default 1.0.
+- Material depth tuning updates:
+  - floor normalScale -> (0.9, 0.9)
+  - trim normalScale -> (0.7, 0.7)
+  - anisotropy remains clamped to 8.
+
+Validation this pass:
+- `node --check client/main.js` (pass)
+- `node --check server/server.js` (pass)
+- local runtime smoke:
+  - `GET /health` on :3100 returns OK
+  - `/assets/environments/_shared/props/props.json` returns 200
+  - `/assets/environments/_shared/hdri/anniversary_lounge_4k.exr` returns 200
+- Playwright skill client run attempted, but failed due missing `playwright` package in this environment.
+
+TODO / follow-up:
+- Run headed visual check once `playwright` is installed to verify shelf-book density and frame-facing final polish in-browser.
