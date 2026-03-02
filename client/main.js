@@ -1585,16 +1585,31 @@ function clampAvatarBaseY(baseY, seatIndex) {
 
 function enforceAvatarWorldFloorClamp(seatIndex, avatarGroup) {
   if (!avatarGroup) return;
-  avatarGroup.updateWorldMatrix(true, false);
-  tmpV3B.setFromMatrixPosition(avatarGroup.matrixWorld);
   const minWorldY = FLOOR_Y + 0.05;
-  if (tmpV3B.y >= minWorldY) return;
-  const delta = minWorldY - tmpV3B.y;
-  avatarGroup.position.y += delta;
-  warnOnce(
-    `avatarWorldFloorClamp:${seatIndex}`,
-    `[avatar] clamped above floor seat=${seatIndex} worldY=${tmpV3B.y.toFixed(3)}`
-  );
+
+  avatarGroup.updateWorldMatrix(true, true);
+  tmpBox.setFromObject(avatarGroup);
+  const meshBottomY = Number.isFinite(tmpBox.min.y) ? tmpBox.min.y : null;
+  if (meshBottomY != null && meshBottomY < minWorldY) {
+    const delta = minWorldY - meshBottomY;
+    avatarGroup.position.y += delta;
+    warnOnce(
+      `avatarWorldFloorClamp:${seatIndex}`,
+      `[avatar] clamped above floor seat=${seatIndex} worldY=${meshBottomY.toFixed(3)}`
+    );
+    return;
+  }
+
+  // Fallback to group-origin clamp in case bbox is unavailable.
+  tmpV3B.setFromMatrixPosition(avatarGroup.matrixWorld);
+  if (tmpV3B.y < minWorldY) {
+    const delta = minWorldY - tmpV3B.y;
+    avatarGroup.position.y += delta;
+    warnOnce(
+      `avatarWorldFloorClampOrigin:${seatIndex}`,
+      `[avatar] origin clamp seat=${seatIndex} worldY=${tmpV3B.y.toFixed(3)}`
+    );
+  }
 }
 
 function beginNameplateDrag(seatIndex, pointerId, clientX, clientY) {
