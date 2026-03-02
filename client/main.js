@@ -502,7 +502,7 @@ const DEFAULT_SCENE_TUNING = {
   avatarY: -0.01,
   chairY: 0.01,
   tableY: 0,
-  seatAvatarYOffset: [3.47, 3.46, 3.39, 3.2]
+  seatAvatarYOffset: [0.37, 0.015, 0.17, 0.11]
 };
 
 const SCENE_TUNING_NUMERIC_KEYS = [
