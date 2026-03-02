@@ -1450,6 +1450,15 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
     const [tile] = hand.splice(idx, 1);
     room.trick.push({ seatIndex, tile: { ...tile } });
     room.played.push({ seatIndex, tile: { ...tile } });
+    broadcastRoomEvent(room, {
+      type: 'game:dominoPlayed',
+      seat: seatIndex,
+      tile: { ...tile },
+      trickState: room.trick.map((entry) => ({
+        seatIndex: entry.seatIndex,
+        tile: { ...entry.tile }
+      }))
+    });
 
     if (room.trick.length < room.activeSeats.length) {
       room.turnSeat = nextActiveSeat(room.activeSeats, seatIndex);

@@ -47,7 +47,8 @@
               <div class="burnPanelTitle" id="burn-title-team1">TEAM 1 BURN PILE</div>
               <div class="burnPanelStats" id="burn-stats-team1">Tiles: 0 | Count pts: 0 | Hand: 0</div>
               <div class="burnRowWrap">
-                <div class="burnHandsStack" id="burn-hands-team1"></div>
+                <div class="burnHandsStack" id="burn-row-team1"></div>
+                <div class="smallText hidden" id="burn-overflow-team1"></div>
               </div>
               <div class="burnFooterTag" id="burn-footer-team1">
                 <div class="burnFooterName">Team 1 Captain</div>
@@ -61,7 +62,8 @@
               <div class="burnPanelTitle" id="burn-title-team2">TEAM 2 BURN PILE</div>
               <div class="burnPanelStats" id="burn-stats-team2">Tiles: 0 | Count pts: 0 | Hand: 0</div>
               <div class="burnRowWrap">
-                <div class="burnHandsStack" id="burn-hands-team2"></div>
+                <div class="burnHandsStack" id="burn-row-team2"></div>
+                <div class="smallText hidden" id="burn-overflow-team2"></div>
               </div>
               <div class="burnFooterTag" id="burn-footer-team2">
                 <div class="burnFooterName">Team 2 Captain</div>
@@ -238,6 +240,12 @@
 
         <section id="section-scene-tuning" class="panelSection">
           <h2>SCENE TUNING</h2>
+          <div class="controlRow">
+            <label>
+              <input id="chairsVisibleToggle" type="checkbox" checked />
+              Show Chairs
+            </label>
+          </div>
           <div class="viewControl">
             <label for="tune_table_scale">Table Scale</label>
             <input id="tune_table_scale" type="range" min="0.50" max="2.50" step="0.01" />
@@ -282,6 +290,20 @@
             <button id="resetSceneTuningBtn">Reset Scene Tuning</button>
             <button id="copySceneTuningBtn">Copy Scene Tuning JSON</button>
           </div>
+        </section>
+
+        <section id="section-debug-table" class="panelSection">
+          <h2>DEBUG: TABLE DOMINOS</h2>
+          <div class="controlRow">
+            <label>
+              <input id="debugTableBoundsToggle" type="checkbox" />
+              Show Table Domino Bounds
+            </label>
+          </div>
+          <div class="buttonRow">
+            <button id="spawnTestDominoBtn">Spawn Test Domino</button>
+          </div>
+          <div id="tableDominoDebugReadout" class="smallText">Trick: 0 | Rendered: 0 | tabletopY: 0.000</div>
         </section>
 
         <section id="section-bidding" class="panelSection">

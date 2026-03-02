@@ -38,6 +38,7 @@ const AVATAR_STORAGE_KEY = 'avatarId';
 const PLAYER_NAME_STORAGE_KEY = 'playerName';
 const VIEW_STORAGE_KEY = 'texas42_view_settings_v1';
 const SCENE_TUNING_STORAGE_KEY = 'texas42_scene_tuning_v1';
+const CHAIRS_VISIBLE_STORAGE_KEY = 'texas42_chairs_visible_v1';
 const PLAYER_ID_STORAGE_KEY = 'texas42_player_id';
 const CLIENT_VERSION = '1.0.0';
 
@@ -61,6 +62,10 @@ const resetViewBtn = document.getElementById('resetViewBtn');
 const copyViewBtn = document.getElementById('copyViewBtn');
 const resetSceneTuningBtn = document.getElementById('resetSceneTuningBtn');
 const copySceneTuningBtn = document.getElementById('copySceneTuningBtn');
+const chairsVisibleToggle = document.getElementById('chairsVisibleToggle');
+const debugTableBoundsToggle = document.getElementById('debugTableBoundsToggle');
+const spawnTestDominoBtn = document.getElementById('spawnTestDominoBtn');
+const tableDominoDebugReadout = document.getElementById('tableDominoDebugReadout');
 const environmentSelect = document.getElementById('environmentSelect');
 const environmentPreview = document.getElementById('environmentPreview');
 const environmentStateText = document.getElementById('environmentStateText');
@@ -85,6 +90,7 @@ const sectionTrump = document.getElementById('section-trump');
 const sectionMarks = document.getElementById('section-marks');
 const sectionView = document.getElementById('section-view');
 const sectionSceneTuning = document.getElementById('section-scene-tuning');
+const sectionDebugTable = document.getElementById('section-debug-table');
 
 const bidButtonsWrap = document.getElementById('bidButtons');
 const trumpButtonsWrap = document.getElementById('trumpButtons');
@@ -107,13 +113,13 @@ const burnPanelDom = {
   teamA: {
     title: document.getElementById('burn-title-team1'),
     stats: document.getElementById('burn-stats-team1'),
-    stack: document.getElementById('burn-hands-team1'),
+    stack: document.getElementById('burn-hands-team1') || document.getElementById('burn-row-team1'),
     footer: document.getElementById('burn-footer-team1')
   },
   teamB: {
     title: document.getElementById('burn-title-team2'),
     stats: document.getElementById('burn-stats-team2'),
-    stack: document.getElementById('burn-hands-team2'),
+    stack: document.getElementById('burn-hands-team2') || document.getElementById('burn-row-team2'),
     footer: document.getElementById('burn-footer-team2')
   }
 };
@@ -207,6 +213,10 @@ const tableRoot = new THREE.Group();
 tableRoot.name = 'tableRoot';
 visualsGroup.add(tableRoot);
 
+const chairsRoot = new THREE.Group();
+chairsRoot.name = 'chairsRoot';
+tableRoot.add(chairsRoot);
+
 const themeGroup = new THREE.Group();
 themeGroup.name = 'themeGroup';
 scene.add(themeGroup);
@@ -223,9 +233,9 @@ const oppHandGroup = new THREE.Group();
 oppHandGroup.name = 'oppHandGroup';
 scene.add(oppHandGroup);
 
-const trickGroup = new THREE.Group();
-trickGroup.name = 'trickGroup';
-scene.add(trickGroup);
+const tablePlayRoot = new THREE.Group();
+tablePlayRoot.name = 'tablePlayRoot';
+scene.add(tablePlayRoot);
 
 const burnGroupA = new THREE.Group();
 const burnGroupB = new THREE.Group();
@@ -234,7 +244,7 @@ oppHandGroup.add(burnGroupB);
 
 const chairSeatGroups = [0, 1, 2, 3].map(() => {
   const g = new THREE.Group();
-  tableRoot.add(g);
+  chairsRoot.add(g);
   return g;
 });
 
@@ -388,6 +398,8 @@ let socketHandlersBound = false;
 let lastDisconnectedToastAt = 0;
 let socketInfoPollTimer = null;
 let healthPollTimer = null;
+let chairsVisible = true;
+let showTableDominoBounds = false;
 localClientId = localStorage.getItem(PLAYER_ID_STORAGE_KEY) || null;
 
 const localHandScreenBounds = {
@@ -611,6 +623,19 @@ function persistSceneTuning() {
     chairY: Number(sceneTuning.chairY),
     tableY: Number(sceneTuning.tableY)
   }));
+}
+
+function loadStoredChairVisibility() {
+  const raw = localStorage.getItem(CHAIRS_VISIBLE_STORAGE_KEY);
+  if (raw == null) {
+    chairsVisible = true;
+    return;
+  }
+  chairsVisible = raw !== '0';
+}
+
+function persistChairVisibility() {
+  localStorage.setItem(CHAIRS_VISIBLE_STORAGE_KEY, chairsVisible ? '1' : '0');
 }
 
 function formatTimerMs(ms) {
@@ -1151,6 +1176,7 @@ function showSections() {
     game: false,
     view: false,
     sceneTuning: false,
+    debugTable: false,
     bidding: false,
     trump: false,
     marks: false
@@ -1163,27 +1189,32 @@ function showSections() {
     show.game = true;
     show.view = true;
     show.sceneTuning = true;
+    show.debugTable = true;
     show.room = true;
   } else if (roomState.phase === PHASES.BIDDING) {
     show.game = true;
     show.view = true;
     show.sceneTuning = true;
+    show.debugTable = true;
     show.bidding = true;
   } else if (roomState.phase === PHASES.CHOOSE_MODE || roomState.phase === PHASES.CHOOSE_TRUMP) {
     show.game = true;
     show.view = true;
     show.sceneTuning = true;
+    show.debugTable = true;
     show.trump = true;
   } else if (roomState.phase === PHASES.PLAYING) {
     show.game = true;
     show.view = true;
     show.sceneTuning = true;
+    show.debugTable = true;
     show.marks = true;
     show.room = true;
   } else {
     show.game = true;
     show.view = true;
     show.sceneTuning = true;
+    show.debugTable = true;
     show.marks = true;
     show.room = true;
   }
@@ -1193,6 +1224,7 @@ function showSections() {
   sectionGame.classList.toggle('hidden', !show.game);
   sectionView.classList.toggle('hidden', !show.view);
   sectionSceneTuning.classList.toggle('hidden', !show.sceneTuning);
+  sectionDebugTable.classList.toggle('hidden', !show.debugTable);
   sectionBidding.classList.toggle('hidden', !show.bidding);
   sectionTrump.classList.toggle('hidden', !show.trump);
   sectionMarks.classList.toggle('hidden', !show.marks);
@@ -1365,7 +1397,7 @@ function lastContributorForTeam(team, handRecord = null) {
 
 function renderBurnPanel(team, data) {
   const panel = burnPanelDom[team];
-  if (!panel) return;
+  if (!panel || !panel.stack) return;
 
   const titleTeam = team === 'teamA' ? 'TEAM 1 BURN PILE' : 'TEAM 2 BURN PILE';
   const handRecords = Array.isArray(data.handRecords) ? data.handRecords : [];
@@ -1378,12 +1410,48 @@ function renderBurnPanel(team, data) {
   panel.stats.textContent = `Tiles: ${totalTiles} | Count pts: ${totalCountPoints} | Hand: ${handWins}`;
 
   panel.stack.replaceChildren();
-  if (!handRecords.length) {
+  if (activeHandTiles.length > 0) {
+    const currentRow = document.createElement('div');
+    currentRow.className = 'burnHandRow';
+    const header = document.createElement('div');
+    header.className = 'burnHandHeader';
+    const label = document.createElement('span');
+    label.textContent = 'CURRENT HAND';
+    const pts = document.createElement('span');
+    pts.className = 'burnHandPts';
+    const activePoints = activeHandTiles.reduce((sum, tile) => sum + countTilePoints(tile), 0);
+    pts.textContent = `+${activePoints} pts`;
+    header.append(label, pts);
+
+    const tilesRow = document.createElement('div');
+    tilesRow.className = 'burnHandTilesRow';
+    const rowTiles = activeHandTiles.slice(0, 4);
+    for (const tile of rowTiles) {
+      tilesRow.appendChild(buildBurnDominoTile(tile, {
+        highlightCount: countTilePoints(tile) > 0,
+        mode: data.mode,
+        trumpSuit: data.trumpSuit
+      }));
+    }
+    const overflow = Math.max(0, activeHandTiles.length - rowTiles.length);
+    if (overflow > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'burnOverflowBadge';
+      badge.textContent = `+${overflow}`;
+      tilesRow.appendChild(badge);
+    }
+    currentRow.append(header, tilesRow);
+    panel.stack.appendChild(currentRow);
+  }
+
+  if (!handRecords.length && activeHandTiles.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'burnHandRow';
     empty.innerHTML = '<div class="burnHandHeader"><span>No completed hands yet</span><span class="burnHandPts">+0 pts</span></div>';
     panel.stack.appendChild(empty);
-  } else {
+  }
+
+  if (handRecords.length) {
     for (const record of handRecords) {
       const row = document.createElement('div');
       row.className = 'burnHandRow';
@@ -2107,10 +2175,14 @@ function updateSceneTuningUi() {
     input.value = `${sceneTuning[key]}`;
     label.textContent = sceneTuning[key].toFixed(2);
   }
+  if (chairsVisibleToggle) {
+    chairsVisibleToggle.checked = chairsVisible;
+  }
 }
 
 function applySceneTuning({ rerenderHand = true } = {}) {
   sanitizeSceneTuning();
+  chairsRoot.visible = !!chairsVisible;
 
   const tableNode = environmentGroup.getObjectByName('tableModel');
   if (tableNode) {
@@ -2598,12 +2670,13 @@ function layoutPlayerHandDominos(seatId, dominos, settings) {
   base.y = Math.max(base.y, tableMetrics.topY + 0.03);
 
   const n = dominos.length;
-  const totalWidth = clampValue(n * 0.19, 1.0, 2.1);
-  let spacing = n > 1 ? totalWidth / (n - 1) : 0;
+  const dominoWidth = DOMINO_SHORT * DOMINO_SCALE;
+  const baseSpacing = dominoWidth + 0.01;
+  let spacing = Math.max(baseSpacing, dominoWidth * 1.1);
   let arcStrength = 0.16;
   const liftY = 0.024;
   const pitch = THREE.MathUtils.degToRad(16);
-  const baseRot = Math.atan2(basis.right.z, basis.right.x);
+  const baseRot = Math.atan2(basis.forward.z, basis.forward.x);
   const meshes = [];
 
   for (const tile of dominos) {
@@ -2664,7 +2737,8 @@ function layoutPlayerHandDominos(seatId, dominos, settings) {
     if (!overflowX && !overflowBottom && !overflowTop) break;
 
     if (overflowX) {
-      spacing = Math.max(0.12, spacing * 0.9);
+      const maxFitSpacing = n > 1 ? Math.max(0.02, (window.innerWidth * 0.00092) / (n - 1)) : spacing;
+      spacing = Math.max(Math.min(maxFitSpacing, spacing * 0.92), dominoWidth * 1.1);
       arcStrength = Math.max(0.1, arcStrength * 0.94);
     }
     if (overflowBottom) {
@@ -2690,10 +2764,63 @@ function layoutPlayerHandDominos(seatId, dominos, settings) {
   localHandScreenBounds.maxY = screenBounds.maxY;
 }
 
+function updateTableDominoDebugReadout(trickLenOverride = null) {
+  if (!tableDominoDebugReadout) return;
+  const trickLen = trickLenOverride != null
+    ? Number(trickLenOverride)
+    : Number(roomState?.trick?.length || 0);
+  tableDominoDebugReadout.textContent = `Trick: ${trickLen} | Rendered: ${tablePlayRoot.children.length} | tabletopY: ${tableMetrics.topY.toFixed(3)}`;
+}
+
+function renderTableTrick(trick) {
+  clearGroup(tablePlayRoot);
+  const plays = Array.isArray(trick) ? trick : [];
+  if (!plays.length) {
+    updateTableDominoDebugReadout(0);
+    return;
+  }
+
+  const localSeat = getLocalSeat();
+  const radius = Math.max(0.38, Math.min(0.62, tableMetrics.radius * 0.14));
+  const centerY = tableMetrics.topY + 0.012;
+
+  for (const play of plays) {
+    const rel = toRelativeSeat(play.seatIndex, localSeat);
+    const cross = [
+      { x: 0, z: radius },
+      { x: radius, z: 0 },
+      { x: 0, z: -radius },
+      { x: -radius, z: 0 }
+    ][rel] || { x: 0, z: 0 };
+
+    const mesh = createDominoMesh(play.tile, {
+      faceUp: true,
+      glowCount: countTilePoints(play.tile) > 0,
+      trumpSuit: roomState?.trumpSuit,
+      useMagentaTrump: roomState?.mode === MODES.TRUMPS,
+      scale: DOMINO_SCALE
+    });
+    mesh.position.set(cross.x, centerY, cross.z);
+    mesh.rotation.y = rel === 1 ? -Math.PI / 2 : rel === 3 ? Math.PI / 2 : rel === 2 ? Math.PI : 0;
+    mesh.userData.tableDomino = true;
+    tablePlayRoot.add(mesh);
+
+    if (showTableDominoBounds) {
+      const helper = new THREE.BoxHelper(mesh, 0xf5d36a);
+      helper.material.depthTest = false;
+      helper.material.transparent = true;
+      helper.material.opacity = 0.9;
+      tablePlayRoot.add(helper);
+    }
+  }
+
+  updateTableDominoDebugReadout(plays.length);
+}
+
 function renderHandsAndTrick() {
   clearGroup(handGroup);
   clearGroup(oppHandGroup);
-  clearGroup(trickGroup);
+  clearGroup(tablePlayRoot);
   localHandScreenBounds.valid = false;
 
   if (!roomState) return;
@@ -2728,27 +2855,7 @@ function renderHandsAndTrick() {
     }
   }
 
-  const trick = roomState.trick || [];
-  const trickSpacing = 1.35;
-  trick.forEach((play) => {
-    const rel = toRelativeSeat(play.seatIndex, localSeat);
-    const pos = [
-      { x: 0, z: 1.02 },
-      { x: trickSpacing, z: 0 },
-      { x: 0, z: -1.02 },
-      { x: -trickSpacing, z: 0 }
-    ][rel] || { x: 0, z: 0 };
-
-    const mesh = createDominoMesh(play.tile, {
-      faceUp: true,
-      glowCount: countTilePoints(play.tile) > 0,
-      trumpSuit: roomState.trumpSuit,
-      useMagentaTrump: roomState.mode === MODES.TRUMPS
-    });
-    mesh.position.set(pos.x, DOMINO_Y + 0.03, pos.z);
-    mesh.rotation.y = rel === 1 ? -Math.PI / 2 : rel === 3 ? Math.PI / 2 : rel === 2 ? Math.PI : 0;
-    trickGroup.add(mesh);
-  });
+  renderTableTrick(roomState.trick || []);
 
   renderBurnPiles();
   if (typeof handGroup.userData.refreshSelection === 'function') {
@@ -2771,6 +2878,7 @@ function updateHud() {
     updateBurnPanels();
     updateTimerControls();
     updateEnvironmentControls();
+    updateTableDominoDebugReadout(0);
     return;
   }
 
@@ -2782,6 +2890,7 @@ function updateHud() {
   updateBurnPanels();
   updateTimerControls();
   updateEnvironmentControls();
+  updateTableDominoDebugReadout(roomState.trick?.length || 0);
 }
 
 function updateTimerControls() {
@@ -3548,6 +3657,13 @@ function connect() {
     updateNameplates();
   });
 
+  socketRef.on('game:dominoPlayed', (payload) => {
+    const trickState = Array.isArray(payload?.trickState) ? payload.trickState : null;
+    if (trickState) {
+      renderTableTrick(trickState);
+    }
+  });
+
   if (socketRef.connected) {
     networkLastConnectAt = Date.now();
     syncSocketInfoFromSingleton();
@@ -3666,6 +3782,12 @@ function ensureButtons() {
     resetViewSettingsToDefault();
   });
 
+  chairsVisibleToggle?.addEventListener('change', () => {
+    chairsVisible = !!chairsVisibleToggle.checked;
+    persistChairVisibility();
+    chairsRoot.visible = chairsVisible;
+  });
+
   timerEnabledToggle.addEventListener('change', () => {
     sendAction('host:timerEnable', { enabled: !!timerEnabledToggle.checked });
   });
@@ -3699,6 +3821,31 @@ function ensureButtons() {
       }
       logMessage(`Ping ok ${ack?.serverTime ? new Date(ack.serverTime).toLocaleTimeString() : ''}`, 1800);
     });
+  });
+
+  debugTableBoundsToggle?.addEventListener('change', () => {
+    showTableDominoBounds = !!debugTableBoundsToggle.checked;
+    renderTableTrick(roomState?.trick || []);
+  });
+
+  spawnTestDominoBtn?.addEventListener('click', () => {
+    const testTile = { a: 6, b: 4, id: '6-4' };
+    const mesh = createDominoMesh(testTile, {
+      faceUp: true,
+      glowCount: true,
+      trumpSuit: roomState?.trumpSuit,
+      useMagentaTrump: roomState?.mode === MODES.TRUMPS,
+      scale: DOMINO_SCALE
+    });
+    mesh.position.set(0, tableMetrics.topY + 0.02, 0);
+    mesh.rotation.y = 0;
+    tablePlayRoot.add(mesh);
+    if (showTableDominoBounds) {
+      const helper = new THREE.BoxHelper(mesh, 0xffd777);
+      helper.material.depthTest = false;
+      tablePlayRoot.add(helper);
+    }
+    updateTableDominoDebugReadout(roomState?.trick?.length || 0);
   });
 
   panelToggle.addEventListener('click', () => {
@@ -3778,7 +3925,7 @@ function addPointerInteraction() {
   const applyVisualState = (mesh, { hovered, selected }) => {
     if (!mesh?.isMesh) return;
     const baseY = Number.isFinite(mesh.userData?.baseY) ? mesh.userData.baseY : DOMINO_Y;
-    const targetY = baseY + (selected ? 0.095 : hovered ? 0.04 : 0);
+    const targetY = baseY + (selected ? 0.016 : hovered ? 0.008 : 0);
     mesh.position.y = targetY;
     const topMat = Array.isArray(mesh.material) ? mesh.material[2] : null;
     if (topMat?.emissive) {
@@ -3871,6 +4018,7 @@ function onResize() {
   controls.update();
   updateNameplatePositions();
   updatePenaltyEmojiPositions();
+  updateTableDominoDebugReadout();
 }
 
 function animate() {
@@ -3984,6 +4132,7 @@ runBootStep('connect', connect);
 
 runBootStep('loadStoredViewSettings', loadStoredViewSettings);
 runBootStep('loadStoredSceneTuning', loadStoredSceneTuning);
+runBootStep('loadStoredChairVisibility', loadStoredChairVisibility);
 runBootStep('updateViewControlsUi', updateViewControlsUi);
 runBootStep('updateSceneTuningUi', updateSceneTuningUi);
 runBootStep('setupViewControls', setupViewControls);

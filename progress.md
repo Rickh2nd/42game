@@ -80,3 +80,33 @@ Validation for this pass:
 - `node --check client/main.js` pass
 - `node --check server/server.js` pass
 - Local server smoke on alternate port confirms snapshot now includes `burnHandsTeamA` and `burnHandsTeamB` arrays.
+
+Update (urgent gameplay/UI fixes pass):
+- Local hand domino layout updated:
+  - portrait orientation lock for hand dominos (long axis vertical to player view)
+  - overlap prevention uses domino-width-based spacing floor
+  - selection lift reduced to subtle y offset (~0.016) to avoid jumpy visuals.
+- Burn panel wiring fixed and strengthened:
+  - left/right burn panel stack ids are wired (`burn-row-team1`, `burn-row-team2`)
+  - immediate current-hand row now renders captured tiles as tricks are won
+  - completed hand history rows still render newest-first with overflow badge.
+- Added chairs visibility toggle (local persistent):
+  - checkbox `chairsVisibleToggle`
+  - localStorage key `texas42_chairs_visible_v1`
+  - toggles `chairsRoot.visible` live without affecting seating logic.
+- Played-domino render pipeline fixed:
+  - new dedicated `tablePlayRoot` group
+  - new `renderTableTrick(trick)` always renders active trick dominos at table center with anti-z-fight y.
+  - `renderHandsAndTrick` now calls `renderTableTrick` every state render.
+  - client listens to `game:dominoPlayed` and renders trick immediately.
+  - server now emits `game:dominoPlayed` on every legal play.
+- Added debug section:
+  - `DEBUG: TABLE DOMINOS` panel
+  - show bounds toggle
+  - spawn test domino button
+  - readout with trick length, rendered children, tabletopY.
+- Syntax checks pass for client and server.
+- Local smoke passed on alternate port:
+  - /health OK
+  - socket.io handshake OK
+  - room:create ack OK.
