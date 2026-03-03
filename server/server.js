@@ -39,8 +39,6 @@ const ENVIRONMENT_MANIFEST_PATH = path.join(ROOT_DIR, 'client', 'assets', 'envir
 const FALLBACK_ENVIRONMENT_IDS = [
   'casino_lounge',
   'spooky_parlor',
-  'rustic_tavern',
-  'modern_suite',
   'neon_arcade'
 ];
 const SOCKET_PATH = '/socket.io';

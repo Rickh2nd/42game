@@ -606,14 +606,6 @@ const ENV_HDRI_CHOICES = {
     primary: '/assets/environments/_shared/hdri/kiara_interior_4k.exr',
     alt: '/assets/environments/_shared/hdri/indoor_pool_4k.exr'
   },
-  rustic_tavern: {
-    primary: '/assets/environments/_shared/hdri/small_workshop_4k.exr',
-    alt: '/assets/environments/_shared/hdri/wooden_studio_01_4k.exr'
-  },
-  modern_suite: {
-    primary: '/assets/environments/_shared/hdri/de_balie_4k.exr',
-    alt: '/assets/environments/_shared/hdri/aft_lounge_4k.exr'
-  },
   neon_arcade: {
     primary: '/assets/environments/_shared/hdri/wooden_studio_11_4k.exr',
     alt: '/assets/environments/_shared/hdri/wooden_studio_09_4k.exr'
@@ -1634,24 +1626,6 @@ const ENV_THEME_PRESETS = {
     rim: { color: 0x8a73d4, intensity: 0.2, pos: [0, 4.5, -7.4] },
     ambient: { sky: 0xd0c2ef, ground: 0x1f1728, intensity: 0.42 },
     fog: { color: '#181321', near: 18, far: 58 }
-  },
-  rustic_tavern: {
-    top: '#5a3d28',
-    bottom: '#1f1610',
-    key: { color: 0xffd29b, intensity: 1.12, pos: [4.1, 6.9, 4.6] },
-    fill: { color: 0xc5a17a, intensity: 0.27, pos: [-5.3, 5.2, -4.0] },
-    rim: { color: 0xe9ab72, intensity: 0.2, pos: [0, 4.4, -7.2] },
-    ambient: { sky: 0xf2dcc1, ground: 0x342417, intensity: 0.48 },
-    fog: { color: '#24180f', near: 18, far: 60 }
-  },
-  modern_suite: {
-    top: '#425767',
-    bottom: '#19222b',
-    key: { color: 0xe7edf5, intensity: 1.1, pos: [4.3, 7.5, 4.0] },
-    fill: { color: 0xa7c1d2, intensity: 0.32, pos: [-5.8, 5.6, -4.5] },
-    rim: { color: 0xc0d8eb, intensity: 0.16, pos: [0, 4.9, -7.5] },
-    ambient: { sky: 0xe5edf5, ground: 0x283947, intensity: 0.52 },
-    fog: { color: '#1d2832', near: 22, far: 70 }
   },
   neon_arcade: {
     top: '#23314e',
@@ -6953,7 +6927,7 @@ async function loadEnvironmentManifest() {
   }
 
   if (!entries.length) {
-    const fallbackIds = ['casino_lounge', 'spooky_parlor', 'rustic_tavern', 'modern_suite', 'neon_arcade'];
+    const fallbackIds = ['casino_lounge', 'spooky_parlor', 'neon_arcade'];
     entries = fallbackIds.map((id) => ({
       id,
       name: id.replace(/_/g, ' '),

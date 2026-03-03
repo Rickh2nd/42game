@@ -11,16 +11,6 @@
     "root": "/assets/environments/spooky_parlor"
   },
   {
-    "id": "rustic_tavern",
-    "name": "Rustic Tavern",
-    "root": "/assets/environments/rustic_tavern"
-  },
-  {
-    "id": "modern_suite",
-    "name": "Modern Suite",
-    "root": "/assets/environments/modern_suite"
-  },
-  {
     "id": "neon_arcade",
     "name": "Neon Arcade",
     "root": "/assets/environments/neon_arcade"
