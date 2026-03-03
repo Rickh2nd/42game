@@ -1,3 +1,14 @@
 node_modules/
 .DS_Store
 npm-debug.log*
+
+# never commit dependencies
+node_modules/
+
+# large 3D source files (keep out of git)
+*.blend
+*.fbx
+
+# we are removing decor/props from repo
+client/assets/environments/_shared/props/
+client/assets/environments/**/props/
