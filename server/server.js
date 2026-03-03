@@ -44,7 +44,7 @@ const FALLBACK_ENVIRONMENT_IDS = [
   'neon_arcade'
 ];
 const SOCKET_PATH = '/socket.io';
-const BETTING_DEFAULT_BANKROLL = 1000;
+const BETTING_DEFAULT_BANKROLL = 0;
 const BETTING_RESPONSE_WINDOW_MS = 20000;
 
 const app = express();
@@ -271,6 +271,7 @@ function createRoom(roomId, hostClientId) {
     lastSevenMarksWinnerTeam: null,
     bettingEnabled: false,
     bettingEnabledNextHand: false,
+    showMarksWidget: false,
     baseBetAmount: 10,
     sessionBankroll: { 0: BETTING_DEFAULT_BANKROLL, 1: BETTING_DEFAULT_BANKROLL, 2: BETTING_DEFAULT_BANKROLL, 3: BETTING_DEFAULT_BANKROLL },
     pendingBets: null,
@@ -402,6 +403,7 @@ function roomPublicSnapshot(room, viewerClientId) {
     lastSevenMarksWinnerTeam: room.lastSevenMarksWinnerTeam || null,
     bettingEnabled: !!room.bettingEnabled,
     bettingEnabledNextHand: !!room.bettingEnabledNextHand,
+    showMarksWidget: !!room.showMarksWidget,
     baseBetAmount: Number(room.baseBetAmount || 10),
     sessionBankroll: { ...room.sessionBankroll },
     pendingBets: room.pendingBets ? {
@@ -1193,6 +1195,11 @@ function finishHand(room) {
   room.champsTeam = nextScores.champsTeam;
   if (nextScores.markAwardedTeam) {
     room.lastSevenMarksWinnerTeam = nextScores.markAwardedTeam;
+    broadcastRoomEvent(room, {
+      type: 'game:sevenMarksWin',
+      team: nextScores.markAwardedTeam,
+      at: Date.now()
+    });
   }
   room.lastHandOutcome = {
     ...outcome,
@@ -1793,6 +1800,13 @@ function handleRoomAction(room, clientId, action, payload, options = {}) {
       type: 'game:environmentChanged',
       environmentId
     });
+    broadcastRoom(room);
+    return true;
+  }
+
+  if (action === 'host:setShowMarksWidget') {
+    if (!ensureHost(room, clientId, action)) return false;
+    room.showMarksWidget = !!payload.enabled;
     broadcastRoom(room);
     return true;
   }

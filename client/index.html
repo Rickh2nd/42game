@@ -49,11 +49,44 @@
 
         <div id="chipTotalsWidget" class="chipTotalsWidget hidden" aria-label="Chip totals">
           <div class="chipTotalsHeader">
-            <span>CHIPS</span>
+            <span>BANKROLL</span>
             <button id="chipTotalsDragHandle" class="widgetDragHandle" title="Drag chip totals widget">MOVE</button>
           </div>
           <div id="chipTotalsPot" class="smallText">Pot: 0</div>
           <div id="chipTotalsList" class="smallText"></div>
+        </div>
+
+        <div id="marksWidget" class="marksWidget hidden" aria-label="Marks tally widget">
+          <div class="marksWidgetHeader">
+            <span>MARKS</span>
+            <button id="marksWidgetDragHandle" class="widgetDragHandle" title="Drag marks widget">MOVE</button>
+          </div>
+          <div class="marksBlock">
+            <div class="marksTitle">Hand Wins</div>
+            <div class="marksCols">
+              <div class="marksCol">
+                <div class="marksColLabel">Team 1</div>
+                <svg id="widget-rounds-teamA" class="menuTallySvg" viewBox="0 0 220 42" aria-label="Widget Team 1 hand wins"></svg>
+              </div>
+              <div class="marksCol">
+                <div class="marksColLabel">Team 2</div>
+                <svg id="widget-rounds-teamB" class="menuTallySvg" viewBox="0 0 220 42" aria-label="Widget Team 2 hand wins"></svg>
+              </div>
+            </div>
+          </div>
+          <div class="marksBlock">
+            <div class="marksTitle">Game Marks</div>
+            <div class="marksCols">
+              <div class="marksCol">
+                <div class="marksColLabel">Team 1</div>
+                <svg id="widget-marks-teamA" class="menuTallySvg" viewBox="0 0 220 42" aria-label="Widget Team 1 game marks"></svg>
+              </div>
+              <div class="marksCol">
+                <div class="marksColLabel">Team 2</div>
+                <svg id="widget-marks-teamB" class="menuTallySvg" viewBox="0 0 220 42" aria-label="Widget Team 2 game marks"></svg>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div id="burnPanels">
@@ -87,6 +120,7 @@
           <div class="nameplate" id="nameplate-3" data-seat="3"></div>
         </div>
         <div id="emojiOverlays"></div>
+        <canvas id="celebrationCanvas" aria-hidden="true"></canvas>
         <div id="socketStatusBadge" class="socketStatusBadge connecting">Connecting</div>
 
         <button id="panelToggle" title="Toggle menu">☰</button>
@@ -159,30 +193,66 @@
         </section>
 
         <section id="section-players" class="panelSection">
-          <h2>PLAYERS</h2>
+          <h2>PLAYER</h2>
+          <div class="controlRow">
+            <label>
+              <input id="muteToggle" type="checkbox" />
+              Mute
+            </label>
+          </div>
+          <div id="audioStateText" class="smallText">Audio: locked</div>
           <div id="seatControls"></div>
         </section>
 
         <section id="section-game" class="panelSection">
-          <h2>GAME</h2>
-          <div class="buttonRow">
-            <button id="startGameBtn">Start Game</button>
-            <button id="restartGameBtn">Restart Game</button>
+          <div class="sectionHeaderRow">
+            <h2>HOST OPTIONS</h2>
+            <button id="toggleHostOptionsBtn" class="sectionToggleBtn" type="button">Collapse</button>
           </div>
-          <div class="controlRow">
-            <label>
-              <input id="timerEnabledToggle" type="checkbox" />
-              Enable Turn Timer
-            </label>
+          <div id="hostOptionsBody">
+            <div class="buttonRow">
+              <button id="startGameBtn">Start Game</button>
+              <button id="restartGameBtn">Restart Game</button>
+            </div>
+            <div class="controlRow">
+              <label>
+                <input id="timerEnabledToggle" type="checkbox" />
+                Enable Turn Timer
+              </label>
+            </div>
+            <div class="buttonRow">
+              <button id="timerPauseBtn">Pause Timer</button>
+            </div>
+            <div id="timerStateText" class="smallText">Timer Off</div>
+            <div class="controlRow">
+              <label>
+                <input id="bettingEnabledToggle" type="checkbox" />
+                Enable Betting
+              </label>
+            </div>
+            <div class="viewControl">
+              <label for="bet_amount">Base Bet</label>
+              <input id="bet_amount" type="range" min="1" max="300" step="1" />
+              <span id="bet_amount_val" class="viewVal">10</span>
+            </div>
+            <div class="controlRow">
+              <label>
+                <input id="showMarksWidgetToggle" type="checkbox" />
+                Show Floating Marks Widget
+              </label>
+            </div>
+            <div id="bettingStateText" class="smallText">Betting Off</div>
+            <div id="bettingDebugText" class="smallText">Betting Debug | enabled: false | isOpen: false | handId: -</div>
+            <div id="bettingTotals" class="smallText"></div>
           </div>
-          <div class="buttonRow">
-            <button id="timerPauseBtn">Pause Timer</button>
-          </div>
-          <div id="timerStateText" class="smallText">Timer Off</div>
+        </section>
+
+        <section id="section-environment" class="panelSection">
+          <h2>ENVIRONMENT</h2>
           <div class="controlRow">
             <label for="environmentSelect">Background</label>
             <select id="environmentSelect"></select>
-            <label for="hdriVariantSelect">Lighting</label>
+            <label for="hdriVariantSelect">Lighting Variant</label>
             <select id="hdriVariantSelect">
               <option value="primary">Primary</option>
               <option value="alt">Alt</option>
@@ -191,25 +261,17 @@
             <div id="environmentStateText" class="smallText"></div>
             <div id="environmentLoadText" class="smallText"></div>
           </div>
-          <div class="viewControl">
-            <label for="burn_panel_opacity">Burn Panel Opacity</label>
-            <input id="burn_panel_opacity" type="range" min="0.01" max="1.00" step="0.01" />
-            <span id="burn_panel_opacity_val" class="viewVal">0.55</span>
-          </div>
-          <div class="viewControl">
-            <label for="table_hud_scale">Table HUD Scale</label>
-            <input id="table_hud_scale" type="range" min="0.15" max="10.50" step="0.05" />
-            <span id="table_hud_scale_val" class="viewVal">1.00</span>
-          </div>
-          <div class="controlRow">
-            <label>
-              <input id="muteToggle" type="checkbox" />
-              Mute
-            </label>
-          </div>
         </section>
 
-        <section id="section-lighting" class="panelSection">
+        <section id="section-admin" class="panelSection">
+          <div class="sectionHeaderRow">
+            <h2>ADMIN</h2>
+            <button id="toggleAdminBtn" class="sectionToggleBtn" type="button">Expand</button>
+          </div>
+          <div class="smallText">View, scene, lighting, and debug tuning controls.</div>
+        </section>
+
+        <section id="section-lighting" class="panelSection adminSection">
           <h2>LIGHTING</h2>
           <h3 class="subhead">TEXTURE DETAIL</h3>
           <div class="viewControl">
@@ -277,8 +339,18 @@
           <div id="lightingStateText" class="smallText">Lighting: not loaded</div>
         </section>
 
-        <section id="section-view" class="panelSection">
+        <section id="section-view" class="panelSection adminSection">
           <h2>VIEW</h2>
+          <div class="viewControl">
+            <label for="burn_panel_opacity">Burn Panel Opacity</label>
+            <input id="burn_panel_opacity" type="range" min="0.01" max="1.00" step="0.01" />
+            <span id="burn_panel_opacity_val" class="viewVal">0.55</span>
+          </div>
+          <div class="viewControl">
+            <label for="table_hud_scale">Table HUD Scale</label>
+            <input id="table_hud_scale" type="range" min="0.15" max="10.50" step="0.05" />
+            <span id="table_hud_scale_val" class="viewVal">1.00</span>
+          </div>
           <div class="viewControl">
             <label for="view_distance">Distance</label>
             <input id="view_distance" type="range" min="0.10" max="24.00" step="0.01" />
@@ -356,7 +428,7 @@
           <div id="settingsLoadText" class="smallText">Settings Loaded | view: defaults | scene: defaults</div>
         </section>
 
-        <section id="section-scene-tuning" class="panelSection">
+        <section id="section-scene-tuning" class="panelSection adminSection">
           <h2>SCENE TUNING</h2>
           <div class="controlRow">
             <label>
@@ -430,25 +502,7 @@
           </div>
         </section>
 
-        <section id="section-betting" class="panelSection">
-          <h2>BETTING</h2>
-          <div class="controlRow">
-            <label>
-              <input id="bettingEnabledToggle" type="checkbox" />
-              Enable Betting
-            </label>
-          </div>
-          <div class="viewControl">
-            <label for="bet_amount">Base Bet</label>
-            <input id="bet_amount" type="range" min="1" max="300" step="1" />
-            <span id="bet_amount_val" class="viewVal">10</span>
-          </div>
-          <div id="bettingStateText" class="smallText">Betting Off</div>
-          <div id="bettingDebugText" class="smallText">Betting Debug | enabled: false | isOpen: false | handId: -</div>
-          <div id="bettingTotals" class="smallText"></div>
-        </section>
-
-        <section id="section-debug-table" class="panelSection">
+        <section id="section-debug-table" class="panelSection adminSection">
           <h2>DEBUG: TABLE DOMINOS</h2>
           <div class="controlRow">
             <label>
@@ -462,7 +516,7 @@
           <div id="tableDominoDebugReadout" class="smallText">Trick: 0 | Rendered: 0 | tabletopY: 0.000</div>
         </section>
 
-        <section id="section-bidding" class="panelSection">
+        <section id="section-bidding" class="panelSection hidden">
           <h2>BIDDING</h2>
           <div class="buttonRow">
             <button id="passBidBtn">Pass</button>
@@ -470,7 +524,7 @@
           <div id="bidButtons" class="gridButtons"></div>
         </section>
 
-        <section id="section-trump" class="panelSection">
+        <section id="section-trump" class="panelSection hidden">
           <h2>TRUMP</h2>
           <div class="smallText" id="modeHelp">Bid winner chooses mode after bidding.</div>
           <div id="modeButtons" class="buttonRow">

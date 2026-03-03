@@ -20,6 +20,8 @@
   --bettingModalOffsetY: 0px;
   --chipWidgetOffsetX: 0px;
   --chipWidgetOffsetY: 0px;
+  --marksWidgetOffsetX: 0px;
+  --marksWidgetOffsetY: 0px;
 }
 
 * {
@@ -423,6 +425,13 @@ body,
   pointer-events: none;
 }
 
+#celebrationCanvas {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+
 .penaltyEmoji {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -474,6 +483,24 @@ body,
 .nameplate.active {
   border-color: var(--gold-strong);
   box-shadow: 0 0 0 1px rgba(242, 204, 119, 0.35), 0 0 15px rgba(242, 204, 119, 0.28);
+}
+
+.nameplate.celebratingTeam {
+  border-color: rgba(255, 239, 168, 0.95);
+  animation: nameplatePulse 0.5s ease-in-out infinite alternate;
+  box-shadow:
+    0 0 0 1px rgba(255, 236, 150, 0.5),
+    0 0 20px rgba(255, 231, 132, 0.56),
+    0 0 42px rgba(255, 235, 160, 0.34);
+}
+
+@keyframes nameplatePulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.035);
+  }
 }
 
 .dragHandle {
@@ -650,6 +677,27 @@ body,
   color: var(--gold);
 }
 
+.sectionHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.sectionHeaderRow h2 {
+  margin: 0;
+}
+
+.sectionToggleBtn {
+  min-width: 90px;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .panelSection .subhead {
   margin: 10px 0 6px;
   font-size: 11px;
@@ -726,6 +774,11 @@ body,
   margin-top: 8px;
   color: #a8b5c8;
   line-height: 1.35;
+}
+
+#audioStateText {
+  margin-bottom: 8px;
+  color: #d8c9aa;
 }
 
 .modal {
@@ -1050,6 +1103,33 @@ body,
   gap: 4px;
 }
 
+.marksWidget {
+  position: absolute;
+  left: 16px;
+  top: 286px;
+  z-index: 4;
+  width: min(300px, 34vw);
+  min-width: 220px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(8, 14, 21, 0.78);
+  backdrop-filter: blur(4px);
+  padding: 8px 10px;
+  pointer-events: none;
+  transform: translate(var(--marksWidgetOffsetX), var(--marksWidgetOffsetY));
+}
+
+.marksWidgetHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #f1d8a3;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
 .controlRow label {
   font-size: 11px;
   color: var(--subtle);
@@ -1172,6 +1252,10 @@ button:disabled {
   display: none !important;
 }
 
+.hiddenByAdminCollapse {
+  display: none !important;
+}
+
 @media (max-width: 920px) {
   .socketStatusBadge {
     right: 62px;
@@ -1241,6 +1325,11 @@ button:disabled {
     top: 84px;
   }
 
+  .marksWidget {
+    width: min(250px, 50vw);
+    top: 244px;
+  }
+
   .bottomTray {
     min-height: 140px;
     max-height: min(270px, 44vh);
@@ -1261,5 +1350,12 @@ button:disabled {
     top: 74px;
     left: 10px;
     min-width: 176px;
+  }
+
+  .marksWidget {
+    top: 224px;
+    left: 10px;
+    min-width: 176px;
+    width: min(210px, 56vw);
   }
 }

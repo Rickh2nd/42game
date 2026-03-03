@@ -763,3 +763,45 @@ Validation:
 - Size reduction observed:
   - repo: ~6.4G -> ~3.8G
   - `client/assets/environments`: now ~486M
+
+Update (celebration/audio/betting/menu/marks widget pass):
+- Added 7-marks celebration FX on client:
+  - Canvas confetti burst (~2.6s) with lightweight particles.
+  - Temporary team highlight pulse on winning team nameplates.
+  - Temporary spotlight point light over winning team seats.
+  - Trigger wired to both snapshot winner transition and server `game:sevenMarksWin` packet event.
+- Hardened audio for Safari/Chrome restrictions:
+  - Audio sources switched to `/assets/sounds/thud.mp3` and `/assets/sounds/party.mp3`.
+  - Added first-gesture unlock via pointer + keydown.
+  - Added menu audio diagnostics line: unlocked / muted / last error.
+  - Added one-time error/status updates for blocked playback and missing files.
+- Added real MP3 assets:
+  - `client/assets/sounds/thud.mp3`
+  - `client/assets/sounds/party.mp3`
+- Betting bankroll semantics updated server-side:
+  - `BETTING_DEFAULT_BANKROLL` changed to 0.
+  - New rooms and `resetForNewGame` now initialize all players to $0 net totals.
+  - Existing wagering flow keeps net running totals (deduct on commit, winners paid from pot).
+- Menu cleanup and structure updates in `client/index.html` + `client/main.js`:
+  - Added `HOST OPTIONS` section with host-only controls grouped (start/restart, timer, betting controls, marks-widget toggle).
+  - Added `ENVIRONMENT` section for background + lighting variant selection.
+  - Added `ADMIN` parent section with collapse/expand control and persisted state.
+  - Added persisted collapsible states for HOST OPTIONS and ADMIN.
+  - Kept bottom trays (bid/mode/trump/chip) separate from side menu.
+- Added host-synced floating marks widget:
+  - Server authoritative state: `showMarksWidget` added to room + snapshots.
+  - New host action: `host:setShowMarksWidget`.
+  - Client overlay `#marksWidget` with same tally SVG style as menu (`widget-rounds-*`, `widget-marks-*`).
+  - Draggable handle with persisted position (`texas42_marks_widget_pos_v1`).
+  - Pointer-events none except drag handle.
+- Added server packet on mark set win:
+  - `game:sevenMarksWin` emitted when a team wins a 7-marks set.
+
+Validation:
+- `node --check client/main.js` (pass)
+- `node --check server/server.js` (pass)
+- Server smoke on port 3099:
+  - `/health` returns 200 JSON
+  - `/assets/sounds/thud.mp3` returns 200
+  - `/assets/sounds/party.mp3` returns 200
+- Playwright skill client currently blocked in this environment because package `playwright` is not installed.

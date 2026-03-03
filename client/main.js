@@ -50,6 +50,9 @@ const TABLE_HUD_STORAGE_KEY = 'texas42_table_hud_v1';
 const BETTING_MODAL_STORAGE_KEY = 'texas42_bet_modal_pos_v1';
 const BETTING_MODAL_STORAGE_KEY_LEGACY = 'texas42_betting_modal_v1';
 const CHIP_WIDGET_STORAGE_KEY = 'texas42_chip_widget_pos_v1';
+const MARKS_WIDGET_STORAGE_KEY = 'texas42_marks_widget_pos_v1';
+const HOST_OPTIONS_COLLAPSED_KEY = 'texas42_host_options_collapsed_v1';
+const ADMIN_COLLAPSED_KEY = 'texas42_admin_collapsed_v1';
 const HDRI_VARIANT_STORAGE_PREFIX = 'texas42_hdri_variant_';
 const MUTE_STORAGE_KEY = 'texas42_mute_v1';
 const PLAYER_ID_STORAGE_KEY = 'texas42_player_id';
@@ -103,13 +106,23 @@ const chipTotalsWidget = document.getElementById('chipTotalsWidget');
 const chipTotalsDragHandle = document.getElementById('chipTotalsDragHandle');
 const chipTotalsList = document.getElementById('chipTotalsList');
 const chipTotalsPot = document.getElementById('chipTotalsPot');
+const marksWidget = document.getElementById('marksWidget');
+const marksWidgetDragHandle = document.getElementById('marksWidgetDragHandle');
+const widgetRoundsTeamA = document.getElementById('widget-rounds-teamA');
+const widgetRoundsTeamB = document.getElementById('widget-rounds-teamB');
+const widgetMarksTeamA = document.getElementById('widget-marks-teamA');
+const widgetMarksTeamB = document.getElementById('widget-marks-teamB');
+const celebrationCanvas = document.getElementById('celebrationCanvas');
+const celebrationCtx = celebrationCanvas?.getContext('2d') || null;
 const timerEnabledToggle = document.getElementById('timerEnabledToggle');
 const timerPauseBtn = document.getElementById('timerPauseBtn');
 const timerStateText = document.getElementById('timerStateText');
 const tableHudScaleInput = document.getElementById('table_hud_scale');
 const tableHudScaleValue = document.getElementById('table_hud_scale_val');
 const muteToggle = document.getElementById('muteToggle');
+const audioStateText = document.getElementById('audioStateText');
 const bettingEnabledToggle = document.getElementById('bettingEnabledToggle');
+const showMarksWidgetToggle = document.getElementById('showMarksWidgetToggle');
 const betAmountInput = document.getElementById('bet_amount');
 const betAmountValue = document.getElementById('bet_amount_val');
 const bettingStateText = document.getElementById('bettingStateText');
@@ -147,14 +160,19 @@ const reconnectNowBtn = document.getElementById('reconnectNowBtn');
 const sectionRoom = document.getElementById('section-room');
 const sectionPlayers = document.getElementById('section-players');
 const sectionGame = document.getElementById('section-game');
+const sectionEnvironment = document.getElementById('section-environment');
+const sectionAdmin = document.getElementById('section-admin');
 const sectionBidding = document.getElementById('section-bidding');
 const sectionTrump = document.getElementById('section-trump');
 const sectionMarks = document.getElementById('section-marks');
 const sectionView = document.getElementById('section-view');
 const sectionSceneTuning = document.getElementById('section-scene-tuning');
-const sectionBetting = document.getElementById('section-betting');
 const sectionLighting = document.getElementById('section-lighting');
 const sectionDebugTable = document.getElementById('section-debug-table');
+const adminSections = [sectionLighting, sectionView, sectionSceneTuning, sectionDebugTable];
+const hostOptionsBody = document.getElementById('hostOptionsBody');
+const toggleHostOptionsBtn = document.getElementById('toggleHostOptionsBtn');
+const toggleAdminBtn = document.getElementById('toggleAdminBtn');
 
 const bidButtonsWrap = document.getElementById('bidButtons');
 const trumpButtonsWrap = document.getElementById('trumpButtons');
@@ -411,6 +429,11 @@ const rimLight = new THREE.DirectionalLight(0xffd3a6, 0.22);
 rimLight.position.set(0, 5, -7.4);
 scene.add(rimLight);
 
+const celebrationLight = new THREE.PointLight(0xfff0b5, 0, 20, 2);
+celebrationLight.position.set(0, 4, 0);
+celebrationLight.castShadow = false;
+scene.add(celebrationLight);
+
 const debugPlane = new THREE.Mesh(
   new THREE.PlaneGeometry(12, 12),
   new THREE.MeshBasicMaterial({
@@ -563,6 +586,13 @@ const DEFAULT_CHIP_WIDGET_SETTINGS = {
   offsetY: 0
 };
 const chipWidgetSettings = { ...DEFAULT_CHIP_WIDGET_SETTINGS };
+const DEFAULT_MARKS_WIDGET_SETTINGS = {
+  offsetX: 0,
+  offsetY: 0
+};
+const marksWidgetSettings = { ...DEFAULT_MARKS_WIDGET_SETTINGS };
+let hostOptionsCollapsed = false;
+let adminCollapsed = true;
 const DEFAULT_HDRI_VARIANT = 'primary';
 let chipBetDraftAmount = 0;
 const hdriVariantByEnv = new Map();
@@ -626,6 +656,7 @@ let audioCtx = null;
 let audioUnlocked = false;
 let audioWarnedUnlocked = false;
 let audioWarnedMissing = false;
+let audioLastError = '';
 const audioElements = {
   thud: null,
   party: null
@@ -639,6 +670,10 @@ let draggingChipWidget = false;
 let chipWidgetPointerId = null;
 let chipWidgetDragStart = { x: 0, y: 0 };
 let chipWidgetOffsetStart = { x: 0, y: 0 };
+let draggingMarksWidget = false;
+let marksWidgetPointerId = null;
+let marksWidgetDragStart = { x: 0, y: 0 };
+let marksWidgetOffsetStart = { x: 0, y: 0 };
 let lastAvatarFloorClampTs = 0;
 
 let localClientId = null;
@@ -671,6 +706,10 @@ let showTableDominoBounds = false;
 let viewSettingsLoadSource = 'defaults';
 let sceneTuningLoadSource = 'defaults';
 let pendingBettingOpenEvent = null;
+let celebrationUntil = 0;
+let celebrationTeam = null;
+const confettiParticles = [];
+let lastCelebrationEventKey = '';
 localClientId = localStorage.getItem(PLAYER_ID_STORAGE_KEY) || null;
 
 const localHandScreenBounds = {
@@ -1188,6 +1227,72 @@ function loadStoredChipWidgetSettings() {
   applyChipWidgetSettings();
 }
 
+function sanitizeMarksWidgetSettings() {
+  marksWidgetSettings.offsetX = clampValue(Number(marksWidgetSettings.offsetX), -1400, 1400, 0);
+  marksWidgetSettings.offsetY = clampValue(Number(marksWidgetSettings.offsetY), -900, 900, 0);
+}
+
+function applyMarksWidgetSettings({ persist = false } = {}) {
+  sanitizeMarksWidgetSettings();
+  document.documentElement.style.setProperty('--marksWidgetOffsetX', `${marksWidgetSettings.offsetX.toFixed(1)}px`);
+  document.documentElement.style.setProperty('--marksWidgetOffsetY', `${marksWidgetSettings.offsetY.toFixed(1)}px`);
+  if (persist) {
+    localStorage.setItem(MARKS_WIDGET_STORAGE_KEY, JSON.stringify({
+      offsetX: Number(marksWidgetSettings.offsetX),
+      offsetY: Number(marksWidgetSettings.offsetY)
+    }));
+  }
+}
+
+function loadStoredMarksWidgetSettings() {
+  try {
+    const raw = localStorage.getItem(MARKS_WIDGET_STORAGE_KEY);
+    if (!raw) {
+      applyMarksWidgetSettings();
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      marksWidgetSettings.offsetX = Number(parsed.offsetX ?? marksWidgetSettings.offsetX);
+      marksWidgetSettings.offsetY = Number(parsed.offsetY ?? marksWidgetSettings.offsetY);
+    }
+  } catch {
+    // ignore invalid payload
+  }
+  applyMarksWidgetSettings();
+}
+
+function loadMenuCollapseState() {
+  hostOptionsCollapsed = localStorage.getItem(HOST_OPTIONS_COLLAPSED_KEY) === '1';
+  const adminStored = localStorage.getItem(ADMIN_COLLAPSED_KEY);
+  adminCollapsed = adminStored == null ? true : adminStored === '1';
+}
+
+function applyMenuCollapseState() {
+  if (hostOptionsBody) {
+    hostOptionsBody.classList.toggle('hidden', hostOptionsCollapsed);
+  }
+  if (toggleHostOptionsBtn) {
+    toggleHostOptionsBtn.textContent = hostOptionsCollapsed ? 'Expand' : 'Collapse';
+  }
+  for (const section of adminSections) {
+    if (!section) continue;
+    section.classList.toggle('hiddenByAdminCollapse', adminCollapsed);
+  }
+  if (toggleAdminBtn) {
+    toggleAdminBtn.textContent = adminCollapsed ? 'Expand' : 'Collapse';
+  }
+}
+
+function updateAudioStatusUi() {
+  if (!audioStateText) return;
+  const unlockedText = audioUnlocked ? 'yes' : 'no';
+  const mutedText = muted ? 'yes' : 'no';
+  const errorText = audioLastError || 'none';
+  audioStateText.textContent = `Audio | unlocked: ${unlockedText} | muted: ${mutedText} | last error: ${errorText}`;
+  audioStateText.title = audioStateText.textContent;
+}
+
 function sanitizeHdriVariant(value) {
   return value === 'alt' ? 'alt' : 'primary';
 }
@@ -1236,6 +1341,7 @@ function setMuted(value, { persist = false } = {}) {
   if (persist) {
     localStorage.setItem(MUTE_STORAGE_KEY, muted ? '1' : '0');
   }
+  updateAudioStatusUi();
 }
 
 function loadStoredMuteSetting() {
@@ -1253,11 +1359,11 @@ function ensureAudioContext() {
 
 function initAudioManager() {
   if (!audioElements.thud) {
-    audioElements.thud = new Audio('/assets/sounds/thud.wav');
+    audioElements.thud = new Audio('/assets/sounds/thud.mp3');
     audioElements.thud.preload = 'auto';
   }
   if (!audioElements.party) {
-    audioElements.party = new Audio('/assets/sounds/party.wav');
+    audioElements.party = new Audio('/assets/sounds/party.mp3');
     audioElements.party.preload = 'auto';
   }
 }
@@ -1267,6 +1373,7 @@ async function unlockAudio() {
   const ctx = ensureAudioContext();
   if (!ctx) {
     audioUnlocked = true;
+    updateAudioStatusUi();
     return true;
   }
   if (ctx.state === 'suspended') {
@@ -1308,6 +1415,7 @@ async function unlockAudio() {
       // ignore element unlock failure; clip may still play after subsequent gestures
     }
   }
+  updateAudioStatusUi();
   return audioUnlocked;
 }
 
@@ -1318,6 +1426,8 @@ function playAudioClip(type) {
     if (!audioWarnedUnlocked) {
       audioWarnedUnlocked = true;
       console.warn('[audio] not unlocked yet');
+      audioLastError = 'blocked until user interaction';
+      updateAudioStatusUi();
     }
     return;
   }
@@ -1326,6 +1436,8 @@ function playAudioClip(type) {
     if (!audioWarnedMissing) {
       audioWarnedMissing = true;
       console.warn('[audio] file missing');
+      audioLastError = 'file missing';
+      updateAudioStatusUi();
     }
     return;
   }
@@ -1337,7 +1449,13 @@ function playAudioClip(type) {
       audioWarnedMissing = true;
       console.warn('[audio] playback failed', error);
     }
+    audioLastError = String(error?.message || error || 'playback failed');
+    updateAudioStatusUi();
   });
+  if (audioLastError) {
+    audioLastError = '';
+    updateAudioStatusUi();
+  }
 }
 
 function playDominoThud() {
@@ -2160,6 +2278,33 @@ function endChipWidgetDrag() {
   chipTotalsDragHandle?.classList.remove('dragging');
 }
 
+function beginMarksWidgetDrag(pointerId, clientX, clientY) {
+  draggingMarksWidget = true;
+  marksWidgetPointerId = pointerId;
+  marksWidgetDragStart = { x: clientX, y: clientY };
+  marksWidgetOffsetStart = {
+    x: Number(marksWidgetSettings.offsetX || 0),
+    y: Number(marksWidgetSettings.offsetY || 0)
+  };
+  marksWidgetDragHandle?.classList.add('dragging');
+}
+
+function updateMarksWidgetDrag(clientX, clientY) {
+  if (!draggingMarksWidget) return;
+  const dx = clientX - marksWidgetDragStart.x;
+  const dy = clientY - marksWidgetDragStart.y;
+  marksWidgetSettings.offsetX = marksWidgetOffsetStart.x + dx;
+  marksWidgetSettings.offsetY = marksWidgetOffsetStart.y + dy;
+  applyMarksWidgetSettings({ persist: true });
+}
+
+function endMarksWidgetDrag() {
+  if (!draggingMarksWidget) return;
+  draggingMarksWidget = false;
+  marksWidgetPointerId = null;
+  marksWidgetDragHandle?.classList.remove('dragging');
+}
+
 function refreshLocalHandScreenBounds() {
   localHandScreenBounds.valid = false;
   let minX = Infinity;
@@ -2354,86 +2499,43 @@ function updatePanelAutoBehavior() {
 }
 
 function showSections() {
-  const show = {
-    room: false,
-    players: false,
-    game: false,
-    betting: false,
-    lighting: false,
-    view: false,
-    sceneTuning: false,
-    debugTable: false,
-    bidding: false,
-    trump: false,
-    marks: false
+  const setHidden = (el, hidden) => {
+    if (!el) return;
+    el.classList.toggle('hidden', !!hidden);
   };
 
   if (!roomState) {
-    show.room = true;
-  } else if (roomState.phase === PHASES.LOBBY) {
-    show.players = true;
-    show.game = true;
-    show.betting = true;
-    show.lighting = true;
-    show.view = true;
-    show.sceneTuning = true;
-    show.debugTable = true;
-    show.room = true;
-  } else if (roomState.phase === PHASES.BIDDING) {
-    show.game = true;
-    show.betting = true;
-    show.lighting = true;
-    show.view = true;
-    show.sceneTuning = true;
-    show.debugTable = true;
-    show.room = true;
-  } else if (roomState.phase === PHASES.BETTING) {
-    show.game = true;
-    show.betting = true;
-    show.lighting = true;
-    show.view = true;
-    show.sceneTuning = true;
-    show.debugTable = true;
-    show.room = true;
-  } else if (roomState.phase === PHASES.CHOOSE_MODE || roomState.phase === PHASES.CHOOSE_TRUMP) {
-    show.game = true;
-    show.betting = true;
-    show.lighting = true;
-    show.view = true;
-    show.sceneTuning = true;
-    show.debugTable = true;
-    show.room = true;
-  } else if (roomState.phase === PHASES.PLAYING) {
-    show.game = true;
-    show.betting = true;
-    show.lighting = true;
-    show.view = true;
-    show.sceneTuning = true;
-    show.debugTable = true;
-    show.marks = true;
-    show.room = true;
-  } else {
-    show.game = true;
-    show.betting = true;
-    show.lighting = true;
-    show.view = true;
-    show.sceneTuning = true;
-    show.debugTable = true;
-    show.marks = true;
-    show.room = true;
+    setHidden(sectionRoom, false);
+    setHidden(sectionPlayers, true);
+    setHidden(sectionGame, true);
+    setHidden(sectionEnvironment, true);
+    setHidden(sectionAdmin, true);
+    setHidden(sectionLighting, true);
+    setHidden(sectionView, true);
+    setHidden(sectionSceneTuning, true);
+    setHidden(sectionDebugTable, true);
+    setHidden(sectionBidding, true);
+    setHidden(sectionTrump, true);
+    setHidden(sectionMarks, true);
+    return;
   }
 
-  sectionRoom.classList.toggle('hidden', !show.room);
-  sectionPlayers.classList.toggle('hidden', !show.players);
-  sectionGame.classList.toggle('hidden', !show.game);
-  sectionBetting.classList.toggle('hidden', !show.betting);
-  sectionLighting.classList.toggle('hidden', !show.lighting);
-  sectionView.classList.toggle('hidden', !show.view);
-  sectionSceneTuning.classList.toggle('hidden', !show.sceneTuning);
-  sectionDebugTable.classList.toggle('hidden', !show.debugTable);
-  sectionBidding.classList.toggle('hidden', !show.bidding);
-  sectionTrump.classList.toggle('hidden', !show.trump);
-  sectionMarks.classList.toggle('hidden', !show.marks);
+  const isHost = roomState.hostClientId === localClientId;
+  setHidden(sectionRoom, false);
+  setHidden(sectionPlayers, false);
+  setHidden(sectionGame, !isHost);
+  setHidden(sectionEnvironment, false);
+  setHidden(sectionAdmin, false);
+  setHidden(sectionBidding, true);
+  setHidden(sectionTrump, true);
+  setHidden(sectionMarks, false);
+
+  const hideAdminChildren = !!adminCollapsed;
+  setHidden(sectionLighting, hideAdminChildren);
+  setHidden(sectionView, hideAdminChildren);
+  setHidden(sectionSceneTuning, hideAdminChildren);
+  setHidden(sectionDebugTable, hideAdminChildren);
+  applyMenuCollapseState();
 }
 
 function closeActionModal() {
@@ -2761,7 +2863,7 @@ function updateChipTotalsWidget() {
     const seat = roomState.seats?.[seatIndex];
     const chips = Number(roomState.sessionBankroll?.[String(seatIndex)] ?? 0);
     const line = document.createElement('div');
-    line.textContent = `${seat?.name || `Seat ${seatIndex + 1}`}: $${chips}`;
+    line.textContent = `${seat?.name || `Seat ${seatIndex + 1}`}: $${chips} net`;
     chipTotalsList.appendChild(line);
   }
 }
@@ -2795,8 +2897,16 @@ function updateBettingControls() {
   if (betAmountValue) {
     betAmountValue.textContent = `${amount}`;
   }
+  if (showMarksWidgetToggle) {
+    showMarksWidgetToggle.checked = !!roomState?.showMarksWidget;
+    showMarksWidgetToggle.disabled = !connected || !roomState || !isHost;
+  }
 
   if (!roomState) {
+    if (showMarksWidgetToggle) {
+      showMarksWidgetToggle.checked = false;
+      showMarksWidgetToggle.disabled = true;
+    }
     if (bettingStateText) bettingStateText.textContent = 'Betting Off';
     if (bettingDebugText) {
       bettingDebugText.textContent = 'Betting Debug | enabled: false | isOpen: false | handId: -';
@@ -2901,6 +3011,20 @@ function updateMarksMenu() {
   renderTallies(menuRoundsTeamB, rounds.teamB);
   renderTallies(menuMarksTeamA, marks.teamA);
   renderTallies(menuMarksTeamB, marks.teamB);
+  updateMarksWidget();
+}
+
+function updateMarksWidget() {
+  if (!marksWidget) return;
+  const shouldShow = !!roomState?.showMarksWidget;
+  marksWidget.classList.toggle('hidden', !shouldShow);
+  if (!shouldShow) return;
+  const rounds = roomState?.roundWins || { teamA: 0, teamB: 0 };
+  const marks = roomState?.gameMarks || { teamA: 0, teamB: 0 };
+  renderTallies(widgetRoundsTeamA, rounds.teamA);
+  renderTallies(widgetRoundsTeamB, rounds.teamB);
+  renderTallies(widgetMarksTeamA, marks.teamA);
+  renderTallies(widgetMarksTeamB, marks.teamB);
 }
 
 function pipPositions(value) {
@@ -4120,6 +4244,125 @@ function updatePenaltyEmojiPositions() {
     projectWorldToScreen(tmpV3B, data);
     data.el.style.left = `${data.x}px`;
     data.el.style.top = `${data.y}px`;
+  }
+}
+
+function resizeCelebrationCanvas() {
+  if (!celebrationCanvas) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.floor(window.innerWidth));
+  const h = Math.max(1, Math.floor(window.innerHeight));
+  if (celebrationCanvas.width !== Math.floor(w * dpr) || celebrationCanvas.height !== Math.floor(h * dpr)) {
+    celebrationCanvas.width = Math.floor(w * dpr);
+    celebrationCanvas.height = Math.floor(h * dpr);
+  }
+  celebrationCanvas.style.width = `${w}px`;
+  celebrationCanvas.style.height = `${h}px`;
+}
+
+function triggerTeamCelebration(team) {
+  if (!team) return;
+  const now = Date.now();
+  celebrationTeam = team;
+  celebrationUntil = now + 2600;
+  confettiParticles.length = 0;
+  resizeCelebrationCanvas();
+
+  const burstCount = 180;
+  for (let i = 0; i < burstCount; i += 1) {
+    confettiParticles.push({
+      x: Math.random() * window.innerWidth,
+      y: -20 - Math.random() * window.innerHeight * 0.25,
+      vx: (Math.random() - 0.5) * 3.2,
+      vy: 1.8 + Math.random() * 5.5,
+      size: 3 + Math.random() * 5,
+      rot: Math.random() * Math.PI * 2,
+      vr: (Math.random() - 0.5) * 0.28,
+      color: ['#f7d97a', '#f7a3c6', '#96d6ff', '#e5f9ff', '#ff9f68'][Math.floor(Math.random() * 5)]
+    });
+  }
+
+  const teamSeats = team === 'teamA' ? [0, 2] : [1, 3];
+  for (const seatIndex of teamSeats) {
+    const node = document.getElementById(`nameplate-${seatIndex}`);
+    node?.classList.add('celebratingTeam');
+  }
+  setTimeout(() => {
+    for (const seatIndex of teamSeats) {
+      const node = document.getElementById(`nameplate-${seatIndex}`);
+      node?.classList.remove('celebratingTeam');
+    }
+  }, 1600);
+
+  const avgPos = new THREE.Vector3();
+  let count = 0;
+  for (const seatIndex of teamSeats) {
+    const seatGroup = avatarSeatGroups[seatIndex];
+    if (!seatGroup) continue;
+    seatGroup.getWorldPosition(tmpV3A);
+    avgPos.add(tmpV3A);
+    count += 1;
+  }
+  if (count > 0) {
+    avgPos.multiplyScalar(1 / count);
+    celebrationLight.position.set(avgPos.x, Math.max(avgPos.y + 2.8, 3.2), avgPos.z);
+  }
+  celebrationLight.intensity = 2.4;
+}
+
+function updateCelebrationFx(deltaSec) {
+  const now = Date.now();
+  if (!celebrationCtx || !celebrationCanvas) return;
+  if (now >= celebrationUntil && confettiParticles.length === 0) {
+    celebrationCtx.clearRect(0, 0, celebrationCanvas.width, celebrationCanvas.height);
+    celebrationLight.intensity = Math.max(0, celebrationLight.intensity - deltaSec * 3.6);
+    return;
+  }
+
+  resizeCelebrationCanvas();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  celebrationCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  celebrationCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+  const gravity = 8.2;
+  const drag = 0.985;
+  for (let i = confettiParticles.length - 1; i >= 0; i -= 1) {
+    const p = confettiParticles[i];
+    p.vy += gravity * deltaSec;
+    p.vx *= drag;
+    p.vy *= drag;
+    p.x += p.vx * 60 * deltaSec;
+    p.y += p.vy * 60 * deltaSec;
+    p.rot += p.vr * 60 * deltaSec;
+
+    if (p.y > window.innerHeight + 30) {
+      confettiParticles.splice(i, 1);
+      continue;
+    }
+
+    celebrationCtx.save();
+    celebrationCtx.translate(p.x, p.y);
+    celebrationCtx.rotate(p.rot);
+    celebrationCtx.fillStyle = p.color;
+    celebrationCtx.fillRect(-p.size * 0.5, -p.size * 0.25, p.size, p.size * 0.5);
+    celebrationCtx.restore();
+  }
+
+  if (now >= celebrationUntil && confettiParticles.length === 0) {
+    celebrationTeam = null;
+  }
+  celebrationLight.intensity = Math.max(0, celebrationLight.intensity - deltaSec * 1.8);
+}
+
+function triggerSevenMarksCelebration(team, eventKey = '') {
+  if (!team) return;
+  const key = eventKey || `${team}:${Math.floor(Date.now() / 500)}`;
+  if (key === lastCelebrationEventKey) return;
+  lastCelebrationEventKey = key;
+  triggerTeamCelebration(team);
+  playPartyBlower();
+  if (!audioUnlocked) {
+    playFallbackPartySynth();
   }
 }
 
@@ -5790,7 +6033,7 @@ function applySnapshot(room) {
   }
 
   if (prevSevenWinner !== roomState.lastSevenMarksWinnerTeam && roomState.lastSevenMarksWinnerTeam) {
-    playPartyBlower();
+    triggerSevenMarksCelebration(roomState.lastSevenMarksWinnerTeam, `snapshot:${roomState.lastSevenMarksWinnerTeam}:${roomState.gameMarks?.teamA || 0}:${roomState.gameMarks?.teamB || 0}`);
   }
 
   applyStoredAvatarIfNeeded();
@@ -5929,6 +6172,14 @@ function handleServerPacket(data) {
     roomState.environmentId = data.environmentId || roomState.environmentId;
     applyEnvironment(roomState.environmentId || 'casino_lounge');
     updateEnvironmentControls();
+    return;
+  }
+
+  if (data.type === 'game:sevenMarksWin') {
+    const team = data.team === 'teamB' ? 'teamB' : data.team === 'teamA' ? 'teamA' : null;
+    if (team) {
+      triggerSevenMarksCelebration(team, `event:${team}:${Number(data.at || 0)}`);
+    }
     return;
   }
 
@@ -6224,6 +6475,10 @@ function ensureButtons() {
     });
   });
 
+  showMarksWidgetToggle?.addEventListener('change', () => {
+    sendAction('host:setShowMarksWidget', { enabled: !!showMarksWidgetToggle.checked });
+  });
+
   betAmountInput?.addEventListener('input', () => {
     const amount = Math.max(1, Math.min(300, Number(betAmountInput.value) || 10));
     betAmountInput.value = `${amount}`;
@@ -6260,6 +6515,24 @@ function ensureButtons() {
   chipTotalsDragHandle?.addEventListener('pointerdown', (event) => {
     beginChipWidgetDrag(event.pointerId, event.clientX, event.clientY);
     event.preventDefault();
+  });
+
+  marksWidgetDragHandle?.addEventListener('pointerdown', (event) => {
+    beginMarksWidgetDrag(event.pointerId, event.clientX, event.clientY);
+    event.preventDefault();
+  });
+
+  toggleHostOptionsBtn?.addEventListener('click', () => {
+    hostOptionsCollapsed = !hostOptionsCollapsed;
+    localStorage.setItem(HOST_OPTIONS_COLLAPSED_KEY, hostOptionsCollapsed ? '1' : '0');
+    applyMenuCollapseState();
+  });
+
+  toggleAdminBtn?.addEventListener('click', () => {
+    adminCollapsed = !adminCollapsed;
+    localStorage.setItem(ADMIN_COLLAPSED_KEY, adminCollapsed ? '1' : '0');
+    applyMenuCollapseState();
+    showSections();
   });
 
   for (const key of LIGHTING_ONLY_KEYS) {
@@ -6437,6 +6710,12 @@ function ensureButtons() {
     updateChipWidgetDrag(event.clientX, event.clientY);
   });
 
+  window.addEventListener('pointermove', (event) => {
+    if (!draggingMarksWidget) return;
+    if (marksWidgetPointerId != null && event.pointerId !== marksWidgetPointerId) return;
+    updateMarksWidgetDrag(event.clientX, event.clientY);
+  });
+
   window.addEventListener('pointerup', (event) => {
     if (draggingPointerId != null && event.pointerId !== draggingPointerId) return;
     endNameplateDrag();
@@ -6452,10 +6731,16 @@ function ensureButtons() {
     endChipWidgetDrag();
   });
 
+  window.addEventListener('pointerup', (event) => {
+    if (marksWidgetPointerId != null && event.pointerId !== marksWidgetPointerId) return;
+    endMarksWidgetDrag();
+  });
+
   window.addEventListener('pointercancel', () => {
     endNameplateDrag();
     endHudBlockDrag();
     endChipWidgetDrag();
+    endMarksWidgetDrag();
   });
 
   window.addEventListener('keydown', (event) => {
@@ -6472,6 +6757,9 @@ function ensureButtons() {
   });
 
   window.addEventListener('pointerdown', () => {
+    void unlockAudio();
+  }, { passive: true });
+  window.addEventListener('keydown', () => {
     void unlockAudio();
   }, { passive: true });
 }
@@ -6566,6 +6854,7 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  resizeCelebrationCanvas();
   safeApplyViewSettings(false);
   if (roomState) {
     renderHandsAndTrick();
@@ -6578,7 +6867,7 @@ function onResize() {
 
 function animate() {
   requestAnimationFrame(animate);
-  clock.getDelta();
+  const delta = clock.getDelta();
   controls.update();
   const now = performance.now();
   if (now - lastAvatarFloorClampTs > 350) {
@@ -6588,6 +6877,7 @@ function animate() {
   updateNameplatePositions();
   updatePenaltyEmojiPositions();
   updateTimerHud();
+  updateCelebrationFx(delta);
   renderer.render(scene, camera);
 }
 
@@ -6701,6 +6991,8 @@ runBootStep('loadStoredChairVisibility', loadStoredChairVisibility);
 runBootStep('loadStoredBurnPanelOpacity', loadStoredBurnPanelOpacity);
 runBootStep('loadStoredTableHudSettings', loadStoredTableHudSettings);
 runBootStep('loadStoredChipWidgetSettings', loadStoredChipWidgetSettings);
+runBootStep('loadStoredMarksWidgetSettings', loadStoredMarksWidgetSettings);
+runBootStep('loadMenuCollapseState', loadMenuCollapseState);
 runBootStep('loadStoredMuteSetting', loadStoredMuteSetting);
 runBootStep('initAudioManager', initAudioManager);
 runBootStep('updateSceneTuningUi', updateSceneTuningUi);
@@ -6708,6 +7000,9 @@ runBootStep('updateViewControlsUi', updateViewControlsUi);
 runBootStep('updateLightingControlsUi', updateLightingControlsUi);
 runBootStep('applyTableHudSettings', applyTableHudSettings);
 runBootStep('applyChipWidgetSettings', applyChipWidgetSettings);
+runBootStep('applyMarksWidgetSettings', applyMarksWidgetSettings);
+runBootStep('applyMenuCollapseState', applyMenuCollapseState);
+runBootStep('updateAudioStatusUi', updateAudioStatusUi);
 runBootStep('setupViewControls', setupViewControls);
 runBootStep('setupSceneTuningControls', setupSceneTuningControls);
 runBootStep('setupLightingControls', setupLightingControls);
@@ -6720,6 +7015,7 @@ runBootStep('updateBettingControls', updateBettingControls);
 runBootStep('updateTimerHud', updateTimerHud);
 runBootStep('updateEnvironmentControls', updateEnvironmentControls);
 runBootStep('updateSocketUi', updateSocketUi);
+runBootStep('resizeCelebrationCanvas', resizeCelebrationCanvas);
 runBootStep('resetViewForLocalSeat', () => resetViewForLocalSeat(true));
 
 void initHdrEnvironment().catch((error) => {
