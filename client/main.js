@@ -599,16 +599,16 @@ const hdriVariantByEnv = new Map();
 
 const ENV_HDRI_CHOICES = {
   casino_lounge: {
-    primary: '/assets/environments/_shared/hdri/anniversary_lounge_4k.exr',
-    alt: '/assets/environments/_shared/hdri/wooden_lounge_4k.exr'
+    primary: '/assets/environments/_shared/hdri/anniversary_lounge_4k_2k.hdr',
+    alt: '/assets/environments/_shared/hdri/anniversary_lounge_4k_2k.hdr'
   },
   spooky_parlor: {
-    primary: '/assets/environments/_shared/hdri/kiara_interior_4k.exr',
-    alt: '/assets/environments/_shared/hdri/indoor_pool_4k.exr'
+    primary: '/assets/environments/_shared/hdri/kiara_interior_4k_2k.hdr',
+    alt: '/assets/environments/_shared/hdri/kiara_interior_4k_2k.hdr'
   },
   neon_arcade: {
-    primary: '/assets/environments/_shared/hdri/wooden_studio_11_4k.exr',
-    alt: '/assets/environments/_shared/hdri/wooden_studio_09_4k.exr'
+    primary: '/assets/environments/_shared/hdri/wooden_studio_11_4k_2k.hdr',
+    alt: '/assets/environments/_shared/hdri/wooden_studio_11_4k_2k.hdr'
   }
 };
 
@@ -4518,8 +4518,8 @@ function mapRoomAssets(files, environmentId) {
   const normalTags = ['normal', '_nrm', '_n'];
   const roughTags = ['roughness', 'rough'];
   const aoTags = ['ambientocclusion', 'ambient_occlusion', 'ao'];
-  const hdriFiles = files.filter((file) => file.toLowerCase().includes('/hdri/') && file.toLowerCase().endsWith('.exr'));
-  const preferredCasinoHdr = hdriFiles.find((file) => file.toLowerCase().includes('anniversary_lounge_4k.exr'));
+  const hdriFiles = files.filter((file) => file.toLowerCase().includes('/hdri/') && file.toLowerCase().endsWith('.hdr'));
+  const preferredCasinoHdr = hdriFiles.find((file) => file.toLowerCase().includes('anniversary_lounge_4k_2k.hdr'));
   const hdri = (environmentId === 'casino_lounge' && preferredCasinoHdr) ? preferredCasinoHdr : (hdriFiles[0] || '');
 
   return {
@@ -4780,14 +4780,15 @@ async function chooseEnvironmentHdri(envRoot, environmentId, catalog) {
   }
   for (const file of catalog || []) {
     const low = String(file).toLowerCase();
-    if (low.includes('/hdri/') && low.endsWith('.exr')) {
+    if (low.includes('/hdri/') && low.endsWith('.hdr')) {
       candidates.push(file);
     }
   }
   if (envRoot) {
     candidates.push(
-      `${envRoot}/hdri/anniversary_lounge_4k.exr`,
-      `${envRoot}/hdri/wooden_lounge_4k.exr`
+      `${envRoot}/hdri/anniversary_lounge_4k_2k.hdr`,
+      `${envRoot}/hdri/kiara_interior_4k_2k.hdr`,
+      `${envRoot}/hdri/wooden_studio_11_4k_2k.hdr`
     );
   }
   const unique = [...new Set(candidates.map((item) => normalizeAssetUrlPath(item)).filter(Boolean))];
@@ -6348,8 +6349,9 @@ async function initHdrEnvironment() {
   };
 
   const hdrCandidates = [
-    '/assets/environments/_shared/hdri/anniversary_lounge_4k.exr',
-    '/assets/environments/_shared/hdri/wooden_lounge_4k.exr'
+    '/assets/environments/_shared/hdri/anniversary_lounge_4k_2k.hdr',
+    '/assets/environments/_shared/hdri/kiara_interior_4k_2k.hdr',
+    '/assets/environments/_shared/hdri/wooden_studio_11_4k_2k.hdr'
   ];
 
   for (const candidate of hdrCandidates) {
@@ -6360,7 +6362,7 @@ async function initHdrEnvironment() {
     return;
   }
 
-  console.warn('[env] No EXR found; using RoomEnvironment fallback.');
+  console.warn('[env] No HDR found; using RoomEnvironment fallback.');
   fallbackEnv();
 }
 
